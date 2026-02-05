@@ -1,0 +1,99 @@
+--[[
+	ColorTypeSystem.lua
+	Elemental type advantages system for damage multipliers
+	
+	Usage:
+		local ColorTypeSystem = require(path.to.ColorTypeSystem)
+		local mult = ColorTypeSystem.GetDamageMultiplier("RED", "YEL")
+]]
+
+local ColorTypeSystem = {}
+
+-- Type definitions with relationships
+ColorTypeSystem.Types = {
+	RED = {Name = "Fire", Color = Color3.fromRGB(255, 50, 50), StrongAgainst = "YEL", WeakAgainst = "BLU"},
+	YEL = {Name = "Lightning", Color = Color3.fromRGB(255, 220, 50), StrongAgainst = "PUR", WeakAgainst = "RED"},
+	PUR = {Name = "Shadow", Color = Color3.fromRGB(180, 80, 255), StrongAgainst = "GRN", WeakAgainst = "YEL"},
+	GRN = {Name = "Nature", Color = Color3.fromRGB(80, 220, 80), StrongAgainst = "BLU", WeakAgainst = "PUR"},
+	BLU = {Name = "Water", Color = Color3.fromRGB(80, 150, 255), StrongAgainst = "RED", WeakAgainst = "GRN"},
+	LIGHT = {Name = "Holy", Color = Color3.fromRGB(255, 255, 200), StrongAgainst = "DARK", WeakAgainst = "DARK"},
+	DARK = {Name = "Void", Color = Color3.fromRGB(60, 40, 80), StrongAgainst = "LIGHT", WeakAgainst = "LIGHT"},
+}
+
+-- Configurable multipliers
+ColorTypeSystem.Multipliers = {
+	Advantage = 1.3,
+	Disadvantage = 0.7,
+	Neutral = 1.0,
+	Mutual = 1.2, -- LIGHT vs DARK (both strong against each other)
+}
+
+-- Pre-built lookup cache for O(1) access
+local cache = {}
+for aType, aData in pairs(ColorTypeSystem.Types) do
+	cache[aType] = {}
+	for dType in pairs(ColorTypeSystem.Types) do
+		if aData.StrongAgainst == dType then
+			-- LIGHT/DARK mutual advantage
+			if (aType == "LIGHT" or aType == "DARK") then
+				cache[aType][dType] = ColorTypeSystem.Multipliers.Mutual
+			else
+				cache[aType][dType] = ColorTypeSystem.Multipliers.Advantage
+			end
+		elseif aData.WeakAgainst == dType then
+			cache[aType][dType] = ColorTypeSystem.Multipliers.Disadvantage
+		else
+			cache[aType][dType] = ColorTypeSystem.Multipliers.Neutral
+		end
+	end
+end
+
+-- Get damage multiplier between attacker and defender types
+function ColorTypeSystem.GetDamageMultiplier(attackerType: string?, defenderType: string?): number
+	if not attackerType or not defenderType then
+		return 1.0
+	end
+	return cache[attackerType] and cache[attackerType][defenderType] or 1.0
+end
+
+-- Get the color for a type
+function ColorTypeSystem.GetTypeColor(colorType: string?): Color3
+	if not colorType or not ColorTypeSystem.Types[colorType] then
+		return Color3.new(1, 1, 1)
+	end
+	return ColorTypeSystem.Types[colorType].Color
+end
+
+-- Get the display name for a type
+function ColorTypeSystem.GetTypeName(colorType: string?): string
+	if not colorType or not ColorTypeSystem.Types[colorType] then
+		return "Neutral"
+	end
+	return ColorTypeSystem.Types[colorType].Name
+end
+
+-- Check if attacker has advantage over defender
+function ColorTypeSystem.HasAdvantage(attackerType: string?, defenderType: string?): boolean
+	return ColorTypeSystem.GetDamageMultiplier(attackerType, defenderType) > 1
+end
+
+-- Check if attacker has disadvantage against defender
+function ColorTypeSystem.HasDisadvantage(attackerType: string?, defenderType: string?): boolean
+	return ColorTypeSystem.GetDamageMultiplier(attackerType, defenderType) < 1
+end
+
+-- Get all types as a list
+function ColorTypeSystem.GetAllTypes(): {string}
+	local types = {}
+	for typeKey in pairs(ColorTypeSystem.Types) do
+		table.insert(types, typeKey)
+	end
+	return types
+end
+
+-- Validate if a type exists
+function ColorTypeSystem.IsValidType(colorType: string?): boolean
+	return colorType ~= nil and ColorTypeSystem.Types[colorType] ~= nil
+end
+
+return ColorTypeSystem

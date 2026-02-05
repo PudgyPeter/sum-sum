@@ -1,0 +1,93 @@
+ANIME TOWER DEFENSE - FEATURE CHECKLIST
+========================================
+
+## GAMEPLAY FEATURES
+[ ] Multiple maps - Different layouts and difficulties
+[ ] Difficulty modes - Easy, Normal, Hard with different rewards
+[X] Fast forward button - Speed up gameplay when confident
+[X] Lives system - Multiple chances before game over
+[ ] Special abilities - Tower-specific activated abilities
+[X] Boss waves - Special powerful mobs every 5 waves
+
+## LOBBY SYSTEM
+[X] Lobby creation - Main hub area before entering game
+[X] Lobby UI - Clean interface for navigation
+[X] Map selection - Choose which map to play (teleport to RockMap)
+[ ] Ready system - Players ready up before starting
+[ ] Party system - Group with friends before playing
+
+### Inventory System
+[X] Inventory UI - Grid-based display of owned towers
+[X] Tower collection - Store all unlocked towers
+[X] Rarity system - Common, Rare, Epic, Legendary tiers
+[X] Tower stats display - View tower info in inventory
+[X] Equip system - Select which towers to bring into game
+[X] Loadout slots - Multiple preset loadouts (6 slots)
+[ ] Sort/filter options - By rarity, type, name, etc.
+[X] Tower details panel - Expanded view with full stats
+
+### Summoning Banner
+[X] Banner UI - Gacha-style summoning interface
+[X] Currency system - Gems/tickets for summoning
+[X] Single summon - Pull one tower at a time
+[X] Multi summon - Pull 10 towers at once (discount)
+[X] Rarity rates - Display pull chances (e.g., 1% legendary)
+[X] Summon animation - Exciting reveal sequence
+[X] Pity system - Guaranteed rare after X pulls
+[ ] Banner rotation - Limited-time featured towers
+[X] Duplicate handling - Convert dupes to currency/upgrades
+[ ] Summon history - Track recent pulls
+
+## PROGRESSION & REWARDS
+[X] Persistent currency - Earn gems/tokens across rounds
+[ ] Tower unlocks - Start with basic towers, unlock more
+[ ] Permanent upgrades - Spend gems on global buffs
+[ ] Achievement system - Challenges with rewards
+[ ] Leaderboards - High scores for each map
+[ ] Daily challenges - Special modifiers for bonus rewards
+
+## VISUAL ENHANCEMENTS
+[ ] Tower skins - Cosmetic variants for towers
+[ ] Mob variety - Different visual types per wave
+[ ] Environmental effects - Day/night cycle, weather
+[ ] Better VFX - Improved projectiles and hit effects
+[ ] Screen shake - On kills or powerful attacks
+[ ] Minimap - Overview of the entire map
+
+## QUALITY OF LIFE
+[ ] Settings menu - Volume, graphics quality, keybinds
+[ ] Tutorial system - For new players
+[ ] Undo last tower placement - Within a few seconds
+[ ] Tower range preview in shop - Before buying
+[ ] Damage statistics - Track which towers dealt most damage
+[ ] Auto-start wave toggle - Option for manual or auto
+
+## ADVANCED FEATURES
+[ ] Co-op multiplayer - 2-4 players defend together
+[X] Tower synergies - Tag-based team synergy bonuses (TagSystem.lua)
+[X] Elemental system - ColorType damage multipliers (ColorTypeSystem.lua)
+[ ] Tower positioning matters - Corner bonuses, high ground advantage
+[X] Mob immunities - Type advantages/resistances via ColorTypeSystem
+
+## UNIT INSTANCE SYSTEM (NEW - Chunk 1)
+[X] UnitInstances schema - Each unit is unique with UUID
+[X] TraitSystem - Random traits based on rarity (offensive, defensive, utility, special)
+[X] RelicSystem - Equipment slots with set bonuses
+[X] EvolutionSystem - XP-based unit evolution (4 stages + trial-locked)
+[X] XPManager - Server-side XP tracking and distribution
+[X] AbilitySystem - Active abilities with cooldowns
+[X] PassiveSystem - Passive abilities, auras, on-hit effects
+[X] ColorTypeSystem - 7 color types with advantage/disadvantage multipliers
+[X] TagSystem - Unit tags, map bonuses, team synergies
+[X] TowerData - Tower definitions with ColorType and Tags
+[X] Data migration - Automatic migration from v1 to v2 schema
+[X] Lobby modules - TraitSystem, RelicSystem, EvolutionSystem shared
+[X] Loadout uses instance IDs - Not tower IDs
+
+## BUG FIXES & OPTIMIZATION
+[X] Mob GUI disappears instantly on death - Fixed health bar falling issue
+[X] Tower targeting priority - Fixed "First" mode targeting
+[ ] Performance optimization - Reduce lag with many mobs
+[ ] Mobile support - Touch controls and UI scaling
+[ ] Error handling - Graceful failures instead of crashes
+[ ] Memory leak prevention - Clean up old objects properly
