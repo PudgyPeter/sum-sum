@@ -459,12 +459,21 @@ function PlayerDataManager.SetupPlayer(player)
 	loadout.Name = "Loadout"
 	loadout.Parent = playerDataFolder
 	
-	-- Load loadout (indexed by slot)
-	for slotNumber, instanceId in pairs(data.Loadout) do
-		local slotValue = Instance.new("StringValue")
-		slotValue.Name = "Slot_" .. slotNumber
-		slotValue.Value = instanceId
-		slotValue.Parent = loadout
+	-- Load loadout (supports both string keys "Slot_N" and legacy numeric keys)
+	for key, instanceId in pairs(data.Loadout) do
+		local slotNumber
+		if type(key) == "string" then
+			slotNumber = tonumber(key:match("Slot_(%d+)"))
+		else
+			slotNumber = key
+		end
+		
+		if slotNumber and slotNumber >= 1 and slotNumber <= 6 then
+			local slotValue = Instance.new("StringValue")
+			slotValue.Name = "Slot_" .. slotNumber
+			slotValue.Value = instanceId
+			slotValue.Parent = loadout
+		end
 	end
 	
 	print("[PlayerData] Setup complete for", player.Name)

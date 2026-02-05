@@ -12,6 +12,9 @@ local LOBBY_PLACE_ID = 110673592671083
 local modules = ReplicatedStorage:WaitForChild("Modules")
 local health = require(modules:WaitForChild("Health"))
 local GameSpeed = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GameSpeed"))
+local TowerData = require(modules:WaitForChild("TowerData"))
+local ColorTypeSystem = require(modules:WaitForChild("ColorTypeSystem"))
+local TagSystem = require(modules:WaitForChild("TagSystem"))
 
 local cash = Players.LocalPlayer:WaitForChild("Cash")
 local functions = ReplicatedStorage:WaitForChild("Functions")
@@ -1248,15 +1251,42 @@ end
 local filledSlots = 0
 for i = 1, 6 do
 	if playerLoadout[i] then
-		local baseTowerName = playerLoadout[i]:match("^([^_]+)")
-
-		local towerModel = towers:FindFirstChild(baseTowerName) or towers:FindFirstChild(playerLoadout[i])
-
+		local instanceId = playerLoadout[i]
+		local towerModel = nil
+		local modelName = nil
+		
+		-- Look up unit instance to get the actual tower ID
+		local unitInstances = playerData and playerData:FindFirstChild("UnitInstances")
+		if unitInstances then
+			local unitInstance = unitInstances:FindFirstChild(instanceId)
+			if unitInstance then
+				local unitId = unitInstance:GetAttribute("UnitId")
+				if unitId then
+					-- Get tower data to find the model name
+					local towerInfo = TowerData.GetTowerById(unitId)
+					if towerInfo then
+						modelName = towerInfo.ModelName or towerInfo.Name
+					end
+				end
+			end
+		end
+		
+		-- Find tower model using the resolved model name
+		if modelName then
+			towerModel = towers:FindFirstChild(modelName)
+		end
+		
+		-- Fallback: try treating the loadout value as a direct tower name (legacy support)
 		if not towerModel then
-			for _, tower in pairs(towers:GetChildren()) do
-				if tower:IsA("Model") and tower.Name:find("^" .. baseTowerName) then
-					towerModel = tower
-					break
+			local baseTowerName = instanceId:match("^([^_]+)")
+			towerModel = towers:FindFirstChild(baseTowerName) or towers:FindFirstChild(instanceId)
+			
+			if not towerModel then
+				for _, tower in pairs(towers:GetChildren()) do
+					if tower:IsA("Model") and tower.Name:find("^" .. baseTowerName) then
+						towerModel = tower
+						break
+					end
 				end
 			end
 		end
@@ -1709,6 +1739,153 @@ local function toggleTowerInfo()
 
 		updatePortrait(selectedTower)
 		showUpgradeStats(nil)
+
+		-- Update Color Type display
+		local colorLabel = gui.UpgradeUi:FindFirstChild("Color", true)
+		local colorType = config:GetAttribute("ColorType")
+		local typeData = colorType and ColorTypeSystem.Types[colorType]
+		
+		if colorLabel and colorLabel:IsA("ImageLabel") then
+			if typeData then
+				colorLabel.Image = typeData.ImageId or ""
+				colorLabel.ImageColor3 = typeData.Color
+				colorLabel.Visible = true
+			else
+				colorLabel.Visible = false
+			end
+		end
+		
+		-- Update UIStroke gradients based on ColorType
+		local endColor = Color3.fromHex("#0b0b0c")
+		local gradientColor
+		if typeData then
+			gradientColor = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, typeData.Color),
+				ColorSequenceKeypoint.new(1, endColor)
+			})
+		else
+			gradientColor = ColorSequence.new({
+				ColorSequenceKeypoint.new(0, endColor),
+				ColorSequenceKeypoint.new(1, endColor)
+			})
+		end
+		
+		-- Apply to Stats.UIStroke.UIGradient
+		local statsGradient = gui.UpgradeUi:FindFirstChild("Stats") and gui.UpgradeUi.Stats:FindFirstChild("UIStroke") and gui.UpgradeUi.Stats.UIStroke:FindFirstChild("UIGradient")
+		if statsGradient then
+			statsGradient.Color = gradientColor
+		end
+		
+		-- Apply to Portrait.UIStroke.UIGradient
+		local portraitGradient = gui.UpgradeUi:FindFirstChild("Portrait") and gui.UpgradeUi.Portrait:FindFirstChild("UIStroke") and gui.UpgradeUi.Portrait.UIStroke:FindFirstChild("UIGradient")
+		if portraitGradient then
+			portraitGradient.Color = gradientColor
+		end
+		
+		-- Apply to UpgradeUi.UIStroke.UIGradient
+		local mainGradient = gui.UpgradeUi:FindFirstChild("UIStroke") and gui.UpgradeUi.UIStroke:FindFirstChild("UIGradient")
+		if mainGradient then
+			mainGradient.Color = gradientColor
+		end
+
+		-- Update Tags display with marquee effect
+		local tagTemplate = gui.UpgradeUi:FindFirstChild("TagTemplate")
+		if tagTemplate then
+			local tagLabel = tagTemplate:FindFirstChild("Tag")
+			local tagsAttr = config:GetAttribute("Tags")
+			
+			if tagsAttr and tagLabel then
+				local tagList = string.split(tagsAttr, ",")
+				if #tagList > 0 then
+					tagTemplate.Visible = true
+					
+					-- Format tags with # prefix and even spacing
+					local formattedTags = {}
+					for _, tag in ipairs(tagList) do
+						local trimmed = string.gsub(tag, "^%s*(.-)%s*$", "%1") -- trim whitespace
+						table.insert(formattedTags, "#" .. trimmed)
+					end
+					
+					-- Hide the template label, we'll create individual ones
+					tagLabel.Visible = false
+					
+					-- Clear any existing tag labels
+					for _, child in ipairs(tagTemplate:GetChildren()) do
+						if child:IsA("TextLabel") and child.Name:match("^TagItem_") then
+							child:Destroy()
+						end
+					end
+					
+					-- Create separate labels for each tag with staggered positions
+					local frameWidth = tagTemplate.AbsoluteSize.X > 0 and tagTemplate.AbsoluteSize.X or 200
+					local tagSpacing = 80 -- pixels between tag start positions
+					local speed = 80 -- pixels per second
+					
+					-- Calculate max tag width for consistent cycle timing
+					local maxTagWidth = 0
+					for _, tagText in ipairs(formattedTags) do
+						local w = #tagText * 7
+						if w > maxTagWidth then maxTagWidth = w end
+					end
+					
+					-- Use consistent distance for all tags (based on longest tag)
+					local totalDistance = frameWidth + maxTagWidth
+					local cycleDuration = totalDistance / speed
+					
+					-- Calculate cumulative delays based on each tag's width
+					local cumulativeDelay = 0
+					local gapBetweenTags = 40 -- pixels of gap between end of one tag and start of next
+					
+					-- Calculate total cycle time (all tags use same cycle duration)
+					local totalTagsWidth = 0
+					for _, tagText in ipairs(formattedTags) do
+						totalTagsWidth = totalTagsWidth + (#tagText * 7) + gapBetweenTags
+					end
+					local fullCycleDuration = (frameWidth + totalTagsWidth) / speed
+					
+					for i, tagText in ipairs(formattedTags) do
+						local label = tagLabel:Clone()
+						label.Name = "TagItem_" .. i
+						label.Text = tagText
+						label.Visible = false -- Start hidden
+						label.AutomaticSize = Enum.AutomaticSize.X
+						label.Size = UDim2.new(0, 0, 1, 0)
+						label.Parent = tagTemplate
+						
+						local tagWidth = #tagText * 7
+						local startPos = -tagWidth -- Start based on own width
+						local endPos = frameWidth + tagWidth -- Exit fully off-screen
+						local travelDistance = endPos - startPos
+						local delay = cumulativeDelay
+						
+						-- Next tag starts after this tag's width + gap passes the entry point
+						cumulativeDelay = cumulativeDelay + (tagWidth + gapBetweenTags) / speed
+						
+						local function runCycle()
+							label.Position = UDim2.new(0, startPos, 0, 0)
+							label.Visible = true -- Show when animation starts
+							
+							-- All tags use same cycle duration for consistent loop
+							local tween = TweenService:Create(label, TweenInfo.new(
+								fullCycleDuration,
+								Enum.EasingStyle.Linear
+							), {
+								Position = UDim2.new(0, startPos + (fullCycleDuration * speed), 0, 0)
+							})
+							
+							tween.Completed:Connect(runCycle)
+							tween:Play()
+						end
+						
+						task.delay(delay, runCycle)
+					end
+				else
+					tagTemplate.Visible = false
+				end
+			else
+				tagTemplate.Visible = false
+			end
+		end
 
 		if config.Owner.Value == Players.LocalPlayer.Name then
 			gui.UpgradeUi.Sell.Visible = true

@@ -15,6 +15,7 @@ local GameManager = require(script.GameManager)
 local ActManager = require(script.ActManager)
 local GameSpeed = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GameSpeed"))
 local MapData = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("MapData"))
+local ModMenuHandler = require(script.ModMenuHandler)
 
 local map = workspace.RockMap
 local info = workspace.Info

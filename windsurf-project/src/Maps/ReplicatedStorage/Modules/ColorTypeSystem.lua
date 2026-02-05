@@ -10,14 +10,15 @@
 local ColorTypeSystem = {}
 
 -- Type definitions with relationships
+-- ImageId: Replace with your Roblox asset IDs (rbxassetid://XXXXXXX)
 ColorTypeSystem.Types = {
-	RED = {Name = "Fire", Color = Color3.fromRGB(255, 50, 50), StrongAgainst = "YEL", WeakAgainst = "BLU"},
-	YEL = {Name = "Lightning", Color = Color3.fromRGB(255, 220, 50), StrongAgainst = "PUR", WeakAgainst = "RED"},
-	PUR = {Name = "Shadow", Color = Color3.fromRGB(180, 80, 255), StrongAgainst = "GRN", WeakAgainst = "YEL"},
-	GRN = {Name = "Nature", Color = Color3.fromRGB(80, 220, 80), StrongAgainst = "BLU", WeakAgainst = "PUR"},
-	BLU = {Name = "Water", Color = Color3.fromRGB(80, 150, 255), StrongAgainst = "RED", WeakAgainst = "GRN"},
-	LIGHT = {Name = "Holy", Color = Color3.fromRGB(255, 255, 200), StrongAgainst = "DARK", WeakAgainst = "DARK"},
-	DARK = {Name = "Void", Color = Color3.fromRGB(60, 40, 80), StrongAgainst = "LIGHT", WeakAgainst = "LIGHT"},
+	RED = {Name = "Fire", Color = Color3.fromRGB(255, 50, 50), StrongAgainst = "YEL", WeakAgainst = "BLU", ImageId = "rbxassetid://0"},
+	YEL = {Name = "Lightning", Color = Color3.fromRGB(255, 220, 50), StrongAgainst = "PUR", WeakAgainst = "RED", ImageId = "rbxassetid://0"},
+	PUR = {Name = "Shadow", Color = Color3.fromRGB(180, 80, 255), StrongAgainst = "GRN", WeakAgainst = "YEL", ImageId = "rbxassetid://0"},
+	GRN = {Name = "Nature", Color = Color3.fromRGB(80, 220, 80), StrongAgainst = "BLU", WeakAgainst = "PUR", ImageId = "rbxassetid://0"},
+	BLU = {Name = "Water", Color = Color3.fromRGB(80, 150, 255), StrongAgainst = "RED", WeakAgainst = "GRN", ImageId = "rbxassetid://0"},
+	LIGHT = {Name = "Holy", Color = Color3.fromRGB(255, 255, 200), StrongAgainst = "DARK", WeakAgainst = "DARK", ImageId = "rbxassetid://0"},
+	DARK = {Name = "Void", Color = Color3.fromRGB(60, 40, 80), StrongAgainst = "LIGHT", WeakAgainst = "LIGHT", ImageId = "rbxassetid://0"},
 }
 
 -- Configurable multipliers
@@ -70,6 +71,14 @@ function ColorTypeSystem.GetTypeName(colorType: string?): string
 		return "Neutral"
 	end
 	return ColorTypeSystem.Types[colorType].Name
+end
+
+-- Get the image ID for a type
+function ColorTypeSystem.GetTypeImage(colorType: string?): string
+	if not colorType or not ColorTypeSystem.Types[colorType] then
+		return ""
+	end
+	return ColorTypeSystem.Types[colorType].ImageId or ""
 end
 
 -- Check if attacker has advantage over defender

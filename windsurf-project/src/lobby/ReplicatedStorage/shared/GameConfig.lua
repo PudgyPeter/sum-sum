@@ -105,8 +105,8 @@ GameConfig.Inventory = {
 --------------------------------------------------------------------------------
 GameConfig.DataStore = {
 	-- DataStore names (change version suffix to wipe/migrate data)
-	PlayerDataStoreName = "PlayerData_v8",
-	LoadoutStoreName = "PlayerLoadouts_v8",
+	PlayerDataStoreName = "PlayerData_v11",
+	LoadoutStoreName = "PlayerLoadouts_v11",
 	
 	-- Retry settings for DataStore operations
 	MaxRetries = 3,
@@ -114,6 +114,43 @@ GameConfig.DataStore = {
 	
 	-- Auto-save interval in seconds (0 = disabled)
 	AutoSaveInterval = 300, -- 5 minutes
+}
+
+--------------------------------------------------------------------------------
+-- TRAIT SYSTEM SETTINGS
+--------------------------------------------------------------------------------
+GameConfig.Traits = {
+	-- Cost to reroll a single trait (in Coins)
+	RerollCost = 100,
+	
+	-- Cost multiplier per reroll attempt (increases each time)
+	RerollCostMultiplier = 1.5,
+	
+	-- Max reroll cost cap
+	RerollCostCap = 1000,
+}
+
+--------------------------------------------------------------------------------
+-- RELIC SYSTEM SETTINGS
+--------------------------------------------------------------------------------
+GameConfig.Relics = {
+	-- Cost to upgrade a relic (base cost, scales with level)
+	UpgradeCostBase = 50,
+	UpgradeCostPerLevel = 25,
+	
+	-- Currency used for relic upgrades
+	UpgradeCurrency = "Coins",
+}
+
+--------------------------------------------------------------------------------
+-- EVOLUTION SYSTEM SETTINGS
+--------------------------------------------------------------------------------
+GameConfig.Evolution = {
+	-- Cost to manually evolve (if player has enough XP)
+	EvolveCost = 0, -- Free if XP requirement met
+	
+	-- Currency used for evolution
+	EvolveCurrency = "Coins",
 }
 
 --------------------------------------------------------------------------------

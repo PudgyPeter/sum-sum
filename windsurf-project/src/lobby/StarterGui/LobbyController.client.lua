@@ -4,6 +4,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
+local ContentProvider = game:GetService("ContentProvider")
 
 local player = Players.LocalPlayer
 print("LobbyController: Got player:", player.Name)
@@ -13,6 +14,10 @@ print("LobbyController: Found LobbyGui")
 
 local TowerData = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TowerData"))
 local MapData = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("MapData"))
+local TraitSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("TraitSystem"))
+local RelicSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("RelicSystem"))
+local EvolutionSystem = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("EvolutionSystem"))
+local GameConfig = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("GameConfig"))
 print("LobbyController: Loaded TowerData")
 print("LobbyController: Loaded MapData")
 
@@ -31,12 +36,34 @@ local GetPartyInfoFunction = functions:WaitForChild("GetPartyInfo")
 local GetPartyMapsFunction = functions:WaitForChild("GetPartyMaps")
 local GetPartyActsFunction = functions:WaitForChild("GetPartyActs")
 
+-- Unit management functions (optional - don't block initialization)
+local GetUnitDetailsFunction = nil
+local RerollTraitFunction = nil
+local GetRelicInventoryFunction = nil
+local EquipRelicFunction = nil
+local UnequipRelicFunction = nil
+local EvolveUnitFunction = nil
+local GetEvolutionInfoFunction = nil
+
+-- Load unit management functions in background (don't block main thread)
+task.spawn(function()
+	GetUnitDetailsFunction = functions:WaitForChild("GetUnitDetails", 30)
+	RerollTraitFunction = functions:WaitForChild("RerollTrait", 30)
+	GetRelicInventoryFunction = functions:WaitForChild("GetRelicInventory", 30)
+	EquipRelicFunction = functions:WaitForChild("EquipRelic", 30)
+	UnequipRelicFunction = functions:WaitForChild("UnequipRelic", 30)
+	EvolveUnitFunction = functions:WaitForChild("EvolveUnit", 30)
+	GetEvolutionInfoFunction = functions:WaitForChild("GetEvolutionInfo", 30)
+	print("LobbyController: Unit management functions loaded")
+end)
+
 local LobbyController = {}
 
 -- State variables
 local selectedMapId = nil
 local selectedAct = 1
 local selectedUnit = nil -- Currently selected unit from inventory for swap system
+local currentUnitDetailsId = nil -- Currently viewing unit in details panel
 
 -- VFX display variables
 local vfxDisplayModel = nil
@@ -47,8 +74,18 @@ local savedCameraType = nil
 -- Rainbow gradient animation for Mythic rarity
 local rainbowConnection = nil
 
--- Map selector variable
-local selectedMapId = nil
+-- Inventory mode state variables
+local inventoryModeActive = false
+local savedInventoryCameraCFrame = nil
+local savedInventoryCameraType = nil
+local savedSky = nil
+local savedAtmosphere = nil
+local hiddenGUIsForInventory = {}
+local inventoryDisplayModel = nil -- Currently displayed unit model in inventory mode
+local inventoryMirrorPart = nil -- Mirror surface under the model
+local inventoryMirrorModel = nil -- Cloned model for reflection
+local inventoryRotationConnection = nil -- Connection for rotating the model
+local inventoryModelRotation = 180 -- Current Y rotation in degrees
 
 -- Update Swap button visibility on all loadout slots
 local function UpdateSwapButtonVisibility()
@@ -267,6 +304,12 @@ local function ShowSummonResult(resultData)
 					if obj:IsA("Script") or obj:IsA("LocalScript") then
 						obj:Destroy()
 					end
+				end
+				
+				-- Remove PlacementVFX folder
+				local placementVFX = modelClone:FindFirstChild("PlacementVFX", true)
+				if placementVFX then
+					placementVFX:Destroy()
 				end
 
 				modelClone.Parent = worldModel
@@ -537,6 +580,231 @@ function LobbyController.MultiSummon()
 	end
 end
 
+-- Spawn unit model in inventory mode at specified position
+local function SpawnInventoryDisplayModel(unitId)
+	-- Clean up existing model
+	if inventoryDisplayModel then
+		inventoryDisplayModel:Destroy()
+		inventoryDisplayModel = nil
+	end
+	
+	-- Get tower data (search array by ID)
+	local tower = nil
+	for _, t in ipairs(TowerData.Towers) do
+		if t.ID == unitId then
+			tower = t
+			break
+		end
+	end
+	if not tower then
+		warn("LobbyController: Tower not found for unitId:", unitId)
+		return
+	end
+	
+	-- Get the model
+	local towersFolder = ReplicatedStorage:FindFirstChild("Towers")
+	if not towersFolder then
+		warn("LobbyController: Towers folder not found in ReplicatedStorage")
+		return
+	end
+	
+	local towerModel = towersFolder:FindFirstChild(tower.ModelName)
+	if not towerModel then
+		warn("LobbyController: Tower model not found:", tower.ModelName)
+		return
+	end
+	
+	-- Clone and setup the model
+	local modelClone = towerModel:Clone()
+	
+	-- Remove scripts and VFX from clone
+	for _, obj in ipairs(modelClone:GetDescendants()) do
+		if obj:IsA("Script") or obj:IsA("LocalScript") then
+			obj:Destroy()
+		elseif obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
+			obj:Destroy()
+		end
+	end
+	
+	-- Remove PlacementVFX folder
+	local placementVFX = modelClone:FindFirstChild("PlacementVFX", true)
+	if placementVFX then
+		placementVFX:Destroy()
+	end
+	
+	-- Position the model at the specified location
+	local displayPosition = Vector3.new(0.462, 598.971, 1196.625)
+	
+	-- Ensure model has a PrimaryPart
+	if not modelClone.PrimaryPart then
+		local rootPart = modelClone:FindFirstChild("HumanoidRootPart") or modelClone:FindFirstChildWhichIsA("BasePart")
+		if rootPart then
+			modelClone.PrimaryPart = rootPart
+		end
+	end
+	
+	-- Anchor all parts to prevent physics jitter
+	for _, part in ipairs(modelClone:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Anchored = true
+		end
+	end
+	
+	-- Use PivotTo for smooth positioning
+	modelClone:PivotTo(CFrame.new(displayPosition) * CFrame.Angles(0, math.rad(180), 0))
+	
+	modelClone.Name = "InventoryDisplayModel"
+	modelClone.Parent = workspace
+	inventoryDisplayModel = modelClone
+	
+	-- Set up ViewportFrame reflection as ScreenGui overlay (more reliable than SurfaceGui)
+	if inventoryMirrorModel then
+		inventoryMirrorModel:Destroy()
+		inventoryMirrorModel = nil
+	end
+	
+	-- Clean up existing mirror GUI
+	local existingMirrorGui = gui:FindFirstChild("MirrorReflectionGui")
+	if existingMirrorGui then
+		existingMirrorGui:Destroy()
+	end
+	
+	-- Create ScreenGui for the reflection overlay
+	local mirrorGui = Instance.new("ScreenGui")
+	mirrorGui.Name = "MirrorReflectionGui"
+	mirrorGui.DisplayOrder = -1 -- Behind other UI
+	mirrorGui.IgnoreGuiInset = true
+	mirrorGui.Parent = gui
+	inventoryMirrorPart = mirrorGui -- Reuse variable for cleanup
+	
+	-- Create ViewportFrame positioned at bottom of screen
+	local viewportFrame = Instance.new("ViewportFrame")
+	viewportFrame.Name = "ReflectionViewport"
+	viewportFrame.Size = UDim2.new(1, 0, 0.4, 0) -- Bottom 40% of screen
+	viewportFrame.Position = UDim2.new(0, 0, 0.6, 0)
+	viewportFrame.BackgroundTransparency = 0.5
+	viewportFrame.BackgroundColor3 = Color3.fromRGB(40, 60, 80)
+	viewportFrame.ImageTransparency = 0.3
+	viewportFrame.Ambient = Color3.fromRGB(200, 200, 200)
+	viewportFrame.LightColor = Color3.fromRGB(255, 255, 255)
+	viewportFrame.LightDirection = Vector3.new(0, -1, -0.5)
+	viewportFrame.Parent = mirrorGui
+	
+	-- Add gradient for fade effect
+	local gradient = Instance.new("UIGradient")
+	gradient.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0),
+		NumberSequenceKeypoint.new(0.3, 0.3),
+		NumberSequenceKeypoint.new(1, 0.8)
+	})
+	gradient.Rotation = 90
+	gradient.Parent = viewportFrame
+	
+	-- Create WorldModel for the reflection
+	local worldModel = Instance.new("WorldModel")
+	worldModel.Parent = viewportFrame
+	
+	-- Clone the model for reflection (flipped upside down)
+	local reflectionClone = modelClone:Clone()
+	reflectionClone.Name = "ReflectionModel"
+	
+	-- Remove scripts and VFX from reflection
+	for _, obj in ipairs(reflectionClone:GetDescendants()) do
+		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") then
+			obj:Destroy()
+		end
+	end
+	
+	reflectionClone.Parent = worldModel
+	inventoryMirrorModel = reflectionClone
+	
+	-- Position reflection at origin, flipped upside down for mirror effect
+	reflectionClone:PivotTo(CFrame.new(0, -3, 0) * CFrame.Angles(math.rad(180), 0, 0))
+	
+	-- Setup camera for the viewport - looking down at the flipped model
+	local viewportCamera = Instance.new("Camera")
+	viewportCamera.Parent = viewportFrame
+	viewportFrame.CurrentCamera = viewportCamera
+	viewportCamera.CFrame = CFrame.new(Vector3.new(0, 5, 8), Vector3.new(0, -2, 0))
+	
+	print("LobbyController: Mirror reflection created (ScreenGui overlay)")
+	
+	-- Play animation if model has a Humanoid
+	local humanoid = modelClone:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		local animator = humanoid:FindFirstChildOfClass("Animator")
+		if not animator then
+			animator = Instance.new("Animator")
+			animator.Parent = humanoid
+		end
+		
+		local animation = Instance.new("Animation")
+		animation.AnimationId = "rbxassetid://74802924296512"
+		
+		local animTrack = animator:LoadAnimation(animation)
+		animTrack.Looped = true
+		animTrack:Play()
+	end
+	
+	-- Set up mouse drag rotation
+	local UserInputService = game:GetService("UserInputService")
+	local isDragging = false
+	local lastMouseX = 0
+	
+	-- Disconnect any existing rotation connection
+	if inventoryRotationConnection then
+		inventoryRotationConnection:Disconnect()
+		inventoryRotationConnection = nil
+	end
+	
+	local function updateModelRotation()
+		if inventoryDisplayModel then
+			local displayPosition = Vector3.new(0.462, 598.971, 1196.625)
+			inventoryDisplayModel:PivotTo(CFrame.new(displayPosition) * CFrame.Angles(0, math.rad(inventoryModelRotation), 0))
+			
+			-- Update mirror reflection rotation (model is at origin in ViewportFrame)
+			if inventoryMirrorModel then
+				inventoryMirrorModel:PivotTo(CFrame.new(0, 0, 0) * CFrame.Angles(math.rad(180), math.rad(inventoryModelRotation), 0))
+			end
+		end
+	end
+	
+	-- Track mouse button state
+	local mouseDownConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isDragging = true
+			lastMouseX = input.Position.X
+		end
+	end)
+	
+	local mouseUpConn = UserInputService.InputEnded:Connect(function(input)
+		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+			isDragging = false
+		end
+	end)
+	
+	local mouseMoveConn = UserInputService.InputChanged:Connect(function(input)
+		if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+			local deltaX = input.Position.X - lastMouseX
+			inventoryModelRotation = inventoryModelRotation - deltaX * 0.5 -- Adjust sensitivity here
+			lastMouseX = input.Position.X
+			updateModelRotation()
+		end
+	end)
+	
+	-- Store connections for cleanup
+	inventoryRotationConnection = {
+		Disconnect = function()
+			mouseDownConn:Disconnect()
+			mouseUpConn:Disconnect()
+			mouseMoveConn:Disconnect()
+		end
+	}
+	
+	print("LobbyController: Spawned inventory display model for", tower.Name)
+end
+
 -- Load and display inventory
 function LobbyController.LoadInventory()
 	print("LobbyController: LoadInventory called")
@@ -648,8 +916,30 @@ function LobbyController.LoadInventory()
 
 			slot.Parent = gridFrame
 
-			-- Click to select unit for swap system (using instanceId for new system)
+			-- Add Details button to open unit details panel
 			local instanceId = towerData.InstanceId
+			local detailsBtn = Instance.new("TextButton")
+			detailsBtn.Name = "DetailsButton"
+			detailsBtn.Size = UDim2.new(0.4, 0, 0, 20)
+			detailsBtn.Position = UDim2.new(0.55, 0, 1, -25)
+			detailsBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 120)
+			detailsBtn.Text = "Details"
+			detailsBtn.TextColor3 = Color3.new(1, 1, 1)
+			detailsBtn.TextSize = 12
+			detailsBtn.Font = Enum.Font.GothamBold
+			detailsBtn.ZIndex = 2
+			detailsBtn.Parent = slot
+			
+			local detailsBtnCorner = Instance.new("UICorner")
+			detailsBtnCorner.CornerRadius = UDim.new(0, 4)
+			detailsBtnCorner.Parent = detailsBtn
+			
+			detailsBtn.Activated:Connect(function()
+				animateButtonPress(detailsBtn)
+				LobbyController.OpenUnitDetails(instanceId)
+			end)
+
+			-- Click to select unit for swap system (using instanceId for new system)
 			slot.Activated:Connect(function()
 				animateButtonPress(slot)
 				
@@ -667,6 +957,11 @@ function LobbyController.LoadInventory()
 				-- Set selected unit (now uses instanceId instead of tower.ID)
 				selectedUnit = instanceId
 				print("LobbyController: Selected unit:", tower.Name, "(instanceId:", instanceId, ")")
+				
+				-- Spawn model in inventory mode
+				if inventoryModeActive then
+					SpawnInventoryDisplayModel(tower.ID)
+				end
 				
 				-- Add selection highlight to this slot
 				local highlight = Instance.new("UIStroke")
@@ -1071,7 +1366,7 @@ function LobbyController.PopulateMapList()
 
 	-- Clear existing map buttons (except Template, LockedTemplate and UIListLayout)
 	for _, child in ipairs(mapListFrame:GetChildren()) do
-		if child:IsA("Frame") and child.Name ~= "Template" and child.Name ~= "LockedTemplate" then
+		if child:IsA("GuiObject") and child.Name ~= "Template" and child.Name ~= "LockedTemplate" and not child:IsA("UIListLayout") and not child:IsA("UIGridLayout") and not child:IsA("UIPadding") then
 			child:Destroy()
 		end
 	end
@@ -1218,7 +1513,7 @@ function LobbyController.ShowActsForMap(mapId)
 
 	-- Clear existing act buttons (except Template, LockedTemplate and UIListLayout)
 	for _, child in ipairs(actListFrame:GetChildren()) do
-		if child:IsA("Frame") and child.Name ~= "Template" and child.Name ~= "LockedTemplate" then
+		if child:IsA("GuiObject") and child.Name ~= "Template" and child.Name ~= "LockedTemplate" and not child:IsA("UIListLayout") and not child:IsA("UIGridLayout") and not child:IsA("UIPadding") then
 			child:Destroy()
 		end
 	end
@@ -1412,6 +1707,829 @@ function LobbyController.PlayGame()
 	end
 end
 
+--------------------------------------------------------------------------------
+-- INVENTORY MODE (Immersive Unit Viewing)
+--------------------------------------------------------------------------------
+
+-- Open inventory mode - locks camera, changes environment, hides other UIs
+function LobbyController.OpenInventoryMode()
+	if inventoryModeActive then return end
+	inventoryModeActive = true
+	print("LobbyController: Opening inventory mode")
+	
+	local Lighting = game:GetService("Lighting")
+	local camera = workspace.CurrentCamera
+	
+	-- Save current camera state
+	savedInventoryCameraCFrame = camera.CFrame
+	savedInventoryCameraType = camera.CameraType
+	
+	-- Save current sky and atmosphere
+	savedSky = Lighting:FindFirstChildOfClass("Sky")
+	savedAtmosphere = Lighting:FindFirstChildOfClass("Atmosphere")
+	
+	-- Hide all GUI elements except GemsDisplay, LoadoutUI, and InventoryUI
+	hiddenGUIsForInventory = {}
+	for _, child in ipairs(gui:GetChildren()) do
+		if child:IsA("GuiObject") and child.Visible then
+			local name = child.Name
+			if name ~= "GemsDisplay" and name ~= "LoadoutUI" and name ~= "InventoryUI" then
+				child.Visible = false
+				table.insert(hiddenGUIsForInventory, child)
+			end
+		end
+	end
+	
+	-- Lock camera to position (0, 600, 1200) looking forward and slightly down
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = CFrame.new(Vector3.new(0, 600, 1200), Vector3.new(0, 400, 0))
+	
+	-- Switch to SkyUnit (remove SkyNormal first)
+	local skyNormal = Lighting:FindFirstChild("SkyNormal")
+	if skyNormal then
+		skyNormal.Parent = nil -- Temporarily remove
+	end
+	if savedSky and savedSky ~= skyNormal then
+		savedSky.Parent = nil -- Temporarily remove any other sky
+	end
+	local skyUnit = Lighting:FindFirstChild("SkyUnit")
+	if not skyUnit then
+		skyUnit = ReplicatedStorage:FindFirstChild("SkyUnit")
+		if skyUnit then
+			skyUnit = skyUnit:Clone()
+		end
+	end
+	if skyUnit then
+		skyUnit.Parent = Lighting
+	end
+	
+	-- Switch to AtmosphereUnit (remove AtmosphereNormal first)
+	local atmosphereNormal = Lighting:FindFirstChild("AtmosphereNormal")
+	if atmosphereNormal then
+		atmosphereNormal.Parent = nil -- Temporarily remove
+	end
+	if savedAtmosphere and savedAtmosphere ~= atmosphereNormal then
+		savedAtmosphere.Parent = nil -- Temporarily remove any other atmosphere
+	end
+	local atmosphereUnit = Lighting:FindFirstChild("AtmosphereUnit")
+	if not atmosphereUnit then
+		atmosphereUnit = ReplicatedStorage:FindFirstChild("AtmosphereUnit")
+		if atmosphereUnit then
+			atmosphereUnit = atmosphereUnit:Clone()
+		end
+	end
+	if atmosphereUnit then
+		atmosphereUnit.Parent = Lighting
+	end
+	
+	-- Show inventory UI
+	local inventoryUI = gui:FindFirstChild("InventoryUI")
+	if inventoryUI then
+		inventoryUI.Visible = true
+		
+		-- Add close button if it doesn't exist
+		local closeBtn = inventoryUI:FindFirstChild("CloseInventoryButton")
+		if not closeBtn then
+			closeBtn = Instance.new("TextButton")
+			closeBtn.Name = "CloseInventoryButton"
+			closeBtn.Size = UDim2.new(0, 120, 0, 40)
+			closeBtn.Position = UDim2.new(1, -130, 0, 10)
+			closeBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 60)
+			closeBtn.Text = "Close"
+			closeBtn.TextColor3 = Color3.new(1, 1, 1)
+			closeBtn.TextSize = 18
+			closeBtn.Font = Enum.Font.GothamBold
+			closeBtn.ZIndex = 10
+			closeBtn.Parent = inventoryUI
+			
+			local closeBtnCorner = Instance.new("UICorner")
+			closeBtnCorner.CornerRadius = UDim.new(0, 8)
+			closeBtnCorner.Parent = closeBtn
+			
+			closeBtn.Activated:Connect(function()
+				animateButtonPress(closeBtn)
+				LobbyController.CloseInventoryMode()
+			end)
+		end
+	end
+	
+	print("LobbyController: Inventory mode active")
+end
+
+-- Close inventory mode - restore camera, environment, and UIs
+function LobbyController.CloseInventoryMode()
+	if not inventoryModeActive then return end
+	inventoryModeActive = false
+	print("LobbyController: Closing inventory mode")
+	
+	local Lighting = game:GetService("Lighting")
+	local camera = workspace.CurrentCamera
+	
+	-- Clean up rotation connection
+	if inventoryRotationConnection then
+		inventoryRotationConnection:Disconnect()
+		inventoryRotationConnection = nil
+	end
+	inventoryModelRotation = 180 -- Reset rotation
+	
+	-- Clean up displayed unit model
+	if inventoryDisplayModel then
+		inventoryDisplayModel:Destroy()
+		inventoryDisplayModel = nil
+	end
+	
+	-- Clean up mirror reflection ScreenGui
+	if inventoryMirrorPart then
+		inventoryMirrorPart:Destroy() -- This is now the ScreenGui
+		inventoryMirrorPart = nil
+	end
+	if inventoryMirrorModel then
+		inventoryMirrorModel = nil -- Already destroyed with ScreenGui
+	end
+	
+	-- Hide inventory UI
+	if gui:FindFirstChild("InventoryUI") then
+		gui.InventoryUI.Visible = false
+	end
+	
+	-- Also close unit details if open
+	local detailsUI = gui:FindFirstChild("UnitDetailsUI")
+	if detailsUI then
+		detailsUI.Visible = false
+	end
+	currentUnitDetailsId = nil
+	
+	-- Restore camera
+	if savedInventoryCameraType then
+		camera.CameraType = savedInventoryCameraType
+	else
+		camera.CameraType = Enum.CameraType.Custom
+	end
+	if savedInventoryCameraCFrame then
+		camera.CFrame = savedInventoryCameraCFrame
+	end
+	
+	-- Remove SkyUnit and restore SkyNormal
+	local skyUnit = Lighting:FindFirstChild("SkyUnit")
+	if skyUnit then
+		skyUnit.Parent = nil
+	end
+	-- Restore SkyNormal
+	local skyNormal = Lighting:FindFirstChild("SkyNormal")
+	if not skyNormal then
+		skyNormal = ReplicatedStorage:FindFirstChild("SkyNormal")
+		if skyNormal then
+			skyNormal = skyNormal:Clone()
+		end
+	end
+	if skyNormal then
+		skyNormal.Parent = Lighting
+	end
+	-- Also restore saved sky if it was different
+	if savedSky and savedSky.Name ~= "SkyNormal" and savedSky.Name ~= "SkyUnit" then
+		savedSky.Parent = Lighting
+	end
+	
+	-- Remove AtmosphereUnit and restore AtmosphereNormal
+	local atmosphereUnit = Lighting:FindFirstChild("AtmosphereUnit")
+	if atmosphereUnit then
+		atmosphereUnit.Parent = nil
+	end
+	-- Restore AtmosphereNormal
+	local atmosphereNormal = Lighting:FindFirstChild("AtmosphereNormal")
+	if not atmosphereNormal then
+		atmosphereNormal = ReplicatedStorage:FindFirstChild("AtmosphereNormal")
+		if atmosphereNormal then
+			atmosphereNormal = atmosphereNormal:Clone()
+		end
+	end
+	if atmosphereNormal then
+		atmosphereNormal.Parent = Lighting
+	end
+	-- Also restore saved atmosphere if it was different
+	if savedAtmosphere and savedAtmosphere.Name ~= "AtmosphereNormal" and savedAtmosphere.Name ~= "AtmosphereUnit" then
+		savedAtmosphere.Parent = Lighting
+	end
+	
+	-- Restore hidden GUI elements
+	for _, guiElement in ipairs(hiddenGUIsForInventory) do
+		if guiElement and guiElement.Parent then
+			guiElement.Visible = true
+		end
+	end
+	hiddenGUIsForInventory = {}
+	
+	-- Clear saved states
+	savedInventoryCameraCFrame = nil
+	savedInventoryCameraType = nil
+	savedSky = nil
+	savedAtmosphere = nil
+	
+	print("LobbyController: Inventory mode closed")
+end
+
+-- Toggle inventory mode
+function LobbyController.ToggleInventoryMode()
+	if inventoryModeActive then
+		LobbyController.CloseInventoryMode()
+	else
+		LobbyController.OpenInventoryMode()
+	end
+end
+
+--------------------------------------------------------------------------------
+-- UNIT DETAILS UI
+--------------------------------------------------------------------------------
+
+-- Open unit details panel
+function LobbyController.OpenUnitDetails(instanceId)
+	print("LobbyController: OpenUnitDetails called for", instanceId)
+	currentUnitDetailsId = instanceId
+	
+	if not GetUnitDetailsFunction then
+		warn("LobbyController: GetUnitDetailsFunction not available")
+		return
+	end
+	
+	local result = GetUnitDetailsFunction:InvokeServer(instanceId)
+	if not result or not result.Success then
+		warn("LobbyController: Failed to get unit details:", result and result.Error or "Unknown error")
+		LobbyController.ShowError(result and result.Error or "Failed to load unit details")
+		return
+	end
+	
+	local unitData = result.Unit
+	local tower = TowerData.GetTowerById(unitData.UnitId)
+	if not tower then
+		warn("LobbyController: Tower data not found for", unitData.UnitId)
+		return
+	end
+	
+	-- Find or create UnitDetailsUI
+	local detailsUI = gui:FindFirstChild("UnitDetailsUI")
+	if not detailsUI then
+		print("LobbyController: UnitDetailsUI not found, creating dynamically")
+		detailsUI = LobbyController.CreateUnitDetailsUI()
+	end
+	
+	if not detailsUI then
+		warn("LobbyController: Could not create UnitDetailsUI")
+		return
+	end
+	
+	-- Populate unit info
+	local unitName = detailsUI:FindFirstChild("UnitName")
+	if unitName then unitName.Text = tower.Name end
+	
+	local unitRarity = detailsUI:FindFirstChild("UnitRarity")
+	if unitRarity then
+		unitRarity.Text = unitData.Rarity or tower.Rarity
+		unitRarity.TextColor3 = TowerData.Rarities[unitData.Rarity or tower.Rarity].Color
+	end
+	
+	-- Populate traits section
+	LobbyController.PopulateTraitsSection(detailsUI, instanceId, result)
+	
+	-- Populate relics section
+	LobbyController.PopulateRelicsSection(detailsUI, instanceId, unitData)
+	
+	-- Populate evolution section
+	LobbyController.PopulateEvolutionSection(detailsUI, instanceId, result)
+	
+	-- Show the UI
+	detailsUI.Visible = true
+end
+
+-- Create unit details UI dynamically (if not present in Studio)
+function LobbyController.CreateUnitDetailsUI()
+	local detailsUI = Instance.new("Frame")
+	detailsUI.Name = "UnitDetailsUI"
+	detailsUI.Size = UDim2.new(0.8, 0, 0.85, 0)
+	detailsUI.Position = UDim2.new(0.1, 0, 0.075, 0)
+	detailsUI.BackgroundColor3 = Color3.fromRGB(30, 30, 40)
+	detailsUI.BorderSizePixel = 0
+	detailsUI.Visible = false
+	detailsUI.Parent = gui
+	
+	-- Add corner radius
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 12)
+	corner.Parent = detailsUI
+	
+	-- Title bar
+	local titleBar = Instance.new("Frame")
+	titleBar.Name = "TitleBar"
+	titleBar.Size = UDim2.new(1, 0, 0, 50)
+	titleBar.BackgroundColor3 = Color3.fromRGB(40, 40, 55)
+	titleBar.BorderSizePixel = 0
+	titleBar.Parent = detailsUI
+	
+	local titleCorner = Instance.new("UICorner")
+	titleCorner.CornerRadius = UDim.new(0, 12)
+	titleCorner.Parent = titleBar
+	
+	local unitName = Instance.new("TextLabel")
+	unitName.Name = "UnitName"
+	unitName.Size = UDim2.new(0.6, 0, 1, 0)
+	unitName.Position = UDim2.new(0.05, 0, 0, 0)
+	unitName.BackgroundTransparency = 1
+	unitName.Text = "Unit Name"
+	unitName.TextColor3 = Color3.new(1, 1, 1)
+	unitName.TextSize = 24
+	unitName.Font = Enum.Font.GothamBold
+	unitName.TextXAlignment = Enum.TextXAlignment.Left
+	unitName.Parent = titleBar
+	
+	local unitRarity = Instance.new("TextLabel")
+	unitRarity.Name = "UnitRarity"
+	unitRarity.Size = UDim2.new(0.25, 0, 1, 0)
+	unitRarity.Position = UDim2.new(0.65, 0, 0, 0)
+	unitRarity.BackgroundTransparency = 1
+	unitRarity.Text = "Rarity"
+	unitRarity.TextColor3 = Color3.fromRGB(255, 215, 0)
+	unitRarity.TextSize = 20
+	unitRarity.Font = Enum.Font.GothamBold
+	unitRarity.Parent = titleBar
+	
+	-- Close button
+	local closeBtn = Instance.new("TextButton")
+	closeBtn.Name = "CloseButton"
+	closeBtn.Size = UDim2.new(0, 40, 0, 40)
+	closeBtn.Position = UDim2.new(1, -45, 0, 5)
+	closeBtn.BackgroundColor3 = Color3.fromRGB(200, 60, 60)
+	closeBtn.Text = "X"
+	closeBtn.TextColor3 = Color3.new(1, 1, 1)
+	closeBtn.TextSize = 20
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.Parent = titleBar
+	
+	local closeBtnCorner = Instance.new("UICorner")
+	closeBtnCorner.CornerRadius = UDim.new(0, 8)
+	closeBtnCorner.Parent = closeBtn
+	
+	closeBtn.Activated:Connect(function()
+		animateButtonPress(closeBtn)
+		detailsUI.Visible = false
+		currentUnitDetailsId = nil
+	end)
+	
+	-- Content area with tabs
+	local contentArea = Instance.new("Frame")
+	contentArea.Name = "ContentArea"
+	contentArea.Size = UDim2.new(1, -20, 1, -70)
+	contentArea.Position = UDim2.new(0, 10, 0, 60)
+	contentArea.BackgroundTransparency = 1
+	contentArea.Parent = detailsUI
+	
+	-- Tab buttons
+	local tabBar = Instance.new("Frame")
+	tabBar.Name = "TabBar"
+	tabBar.Size = UDim2.new(1, 0, 0, 40)
+	tabBar.BackgroundTransparency = 1
+	tabBar.Parent = contentArea
+	
+	local tabLayout = Instance.new("UIListLayout")
+	tabLayout.FillDirection = Enum.FillDirection.Horizontal
+	tabLayout.Padding = UDim.new(0, 10)
+	tabLayout.Parent = tabBar
+	
+	local tabs = {"Traits", "Relics", "Evolution"}
+	local tabFrames = {}
+	
+	for i, tabName in ipairs(tabs) do
+		local tabBtn = Instance.new("TextButton")
+		tabBtn.Name = tabName .. "Tab"
+		tabBtn.Size = UDim2.new(0, 120, 1, 0)
+		tabBtn.BackgroundColor3 = i == 1 and Color3.fromRGB(80, 80, 120) or Color3.fromRGB(50, 50, 70)
+		tabBtn.Text = tabName
+		tabBtn.TextColor3 = Color3.new(1, 1, 1)
+		tabBtn.TextSize = 16
+		tabBtn.Font = Enum.Font.GothamBold
+		tabBtn.Parent = tabBar
+		
+		local tabBtnCorner = Instance.new("UICorner")
+		tabBtnCorner.CornerRadius = UDim.new(0, 8)
+		tabBtnCorner.Parent = tabBtn
+		
+		-- Create tab content frame
+		local tabFrame = Instance.new("ScrollingFrame")
+		tabFrame.Name = tabName .. "Frame"
+		tabFrame.Size = UDim2.new(1, 0, 1, -50)
+		tabFrame.Position = UDim2.new(0, 0, 0, 45)
+		tabFrame.BackgroundColor3 = Color3.fromRGB(35, 35, 50)
+		tabFrame.BorderSizePixel = 0
+		tabFrame.ScrollBarThickness = 6
+		tabFrame.Visible = i == 1
+		tabFrame.CanvasSize = UDim2.new(0, 0, 0, 0)
+		tabFrame.AutomaticCanvasSize = Enum.AutomaticSize.Y
+		tabFrame.Parent = contentArea
+		
+		local tabFrameCorner = Instance.new("UICorner")
+		tabFrameCorner.CornerRadius = UDim.new(0, 8)
+		tabFrameCorner.Parent = tabFrame
+		
+		local tabPadding = Instance.new("UIPadding")
+		tabPadding.PaddingAll = UDim.new(0, 10)
+		tabPadding.Parent = tabFrame
+		
+		local tabListLayout = Instance.new("UIListLayout")
+		tabListLayout.Padding = UDim.new(0, 8)
+		tabListLayout.Parent = tabFrame
+		
+		tabFrames[tabName] = tabFrame
+		
+		tabBtn.Activated:Connect(function()
+			animateButtonPress(tabBtn)
+			-- Hide all tab frames and reset button colors
+			for _, frame in pairs(tabFrames) do
+				frame.Visible = false
+			end
+			for _, btn in ipairs(tabBar:GetChildren()) do
+				if btn:IsA("TextButton") then
+					btn.BackgroundColor3 = Color3.fromRGB(50, 50, 70)
+				end
+			end
+			-- Show selected tab
+			tabFrame.Visible = true
+			tabBtn.BackgroundColor3 = Color3.fromRGB(80, 80, 120)
+		end)
+	end
+	
+	return detailsUI
+end
+
+-- Populate traits section
+function LobbyController.PopulateTraitsSection(detailsUI, instanceId, result)
+	local traitsFrame = detailsUI:FindFirstChild("TraitsFrame", true)
+	if not traitsFrame then return end
+	
+	-- Clear existing trait items
+	for _, child in ipairs(traitsFrame:GetChildren()) do
+		if child:IsA("Frame") and child.Name ~= "Template" then
+			child:Destroy()
+		end
+	end
+	
+	local unitData = result.Unit
+	local traits = unitData.Traits or {}
+	local traitDescriptions = result.TraitDescriptions or {}
+	
+	if #traits == 0 then
+		local noTraits = Instance.new("TextLabel")
+		noTraits.Name = "NoTraits"
+		noTraits.Size = UDim2.new(1, 0, 0, 40)
+		noTraits.BackgroundTransparency = 1
+		noTraits.Text = "This unit has no traits"
+		noTraits.TextColor3 = Color3.fromRGB(150, 150, 150)
+		noTraits.TextSize = 16
+		noTraits.Font = Enum.Font.Gotham
+		noTraits.Parent = traitsFrame
+		return
+	end
+	
+	for i, traitName in ipairs(traits) do
+		local traitData = TraitSystem.GetTrait(traitName)
+		local description = traitDescriptions[traitName] or (traitData and traitData.Description) or "No description"
+		
+		local traitItem = Instance.new("Frame")
+		traitItem.Name = "Trait_" .. i
+		traitItem.Size = UDim2.new(1, 0, 0, 70)
+		traitItem.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+		traitItem.BorderSizePixel = 0
+		traitItem.Parent = traitsFrame
+		
+		local traitCorner = Instance.new("UICorner")
+		traitCorner.CornerRadius = UDim.new(0, 8)
+		traitCorner.Parent = traitItem
+		
+		local traitNameLabel = Instance.new("TextLabel")
+		traitNameLabel.Name = "TraitName"
+		traitNameLabel.Size = UDim2.new(0.6, 0, 0, 25)
+		traitNameLabel.Position = UDim2.new(0.02, 0, 0.1, 0)
+		traitNameLabel.BackgroundTransparency = 1
+		traitNameLabel.Text = traitName
+		traitNameLabel.TextColor3 = traitData and GameConfig.GetRarityColor(traitData.Rarity) or Color3.new(1, 1, 1)
+		traitNameLabel.TextSize = 18
+		traitNameLabel.Font = Enum.Font.GothamBold
+		traitNameLabel.TextXAlignment = Enum.TextXAlignment.Left
+		traitNameLabel.Parent = traitItem
+		
+		local traitDesc = Instance.new("TextLabel")
+		traitDesc.Name = "TraitDesc"
+		traitDesc.Size = UDim2.new(0.7, 0, 0, 25)
+		traitDesc.Position = UDim2.new(0.02, 0, 0.55, 0)
+		traitDesc.BackgroundTransparency = 1
+		traitDesc.Text = description
+		traitDesc.TextColor3 = Color3.fromRGB(180, 180, 180)
+		traitDesc.TextSize = 14
+		traitDesc.Font = Enum.Font.Gotham
+		traitDesc.TextXAlignment = Enum.TextXAlignment.Left
+		traitDesc.Parent = traitItem
+		
+		-- Reroll button
+		local rerollBtn = Instance.new("TextButton")
+		rerollBtn.Name = "RerollButton"
+		rerollBtn.Size = UDim2.new(0, 80, 0, 35)
+		rerollBtn.Position = UDim2.new(1, -90, 0.5, -17)
+		rerollBtn.BackgroundColor3 = Color3.fromRGB(100, 80, 180)
+		rerollBtn.Text = "Reroll"
+		rerollBtn.TextColor3 = Color3.new(1, 1, 1)
+		rerollBtn.TextSize = 14
+		rerollBtn.Font = Enum.Font.GothamBold
+		rerollBtn.Parent = traitItem
+		
+		local rerollCorner = Instance.new("UICorner")
+		rerollCorner.CornerRadius = UDim.new(0, 6)
+		rerollCorner.Parent = rerollBtn
+		
+		local currentTraitName = traitName
+		rerollBtn.Activated:Connect(function()
+			animateButtonPress(rerollBtn)
+			LobbyController.RerollTrait(instanceId, currentTraitName)
+		end)
+	end
+end
+
+-- Populate relics section
+function LobbyController.PopulateRelicsSection(detailsUI, instanceId, unitData)
+	local relicsFrame = detailsUI:FindFirstChild("RelicsFrame", true)
+	if not relicsFrame then return end
+	
+	-- Clear existing relic items
+	for _, child in ipairs(relicsFrame:GetChildren()) do
+		if child:IsA("Frame") and child.Name ~= "Template" then
+			child:Destroy()
+		end
+	end
+	
+	local equippedRelics = unitData.EquippedRelics or {}
+	
+	-- Show slots
+	for _, slotName in ipairs(RelicSystem.Slots) do
+		local slotFrame = Instance.new("Frame")
+		slotFrame.Name = "Slot_" .. slotName
+		slotFrame.Size = UDim2.new(1, 0, 0, 80)
+		slotFrame.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+		slotFrame.BorderSizePixel = 0
+		slotFrame.Parent = relicsFrame
+		
+		local slotCorner = Instance.new("UICorner")
+		slotCorner.CornerRadius = UDim.new(0, 8)
+		slotCorner.Parent = slotFrame
+		
+		local slotLabel = Instance.new("TextLabel")
+		slotLabel.Name = "SlotName"
+		slotLabel.Size = UDim2.new(0.25, 0, 1, 0)
+		slotLabel.BackgroundTransparency = 1
+		slotLabel.Text = slotName
+		slotLabel.TextColor3 = Color3.fromRGB(200, 200, 200)
+		slotLabel.TextSize = 16
+		slotLabel.Font = Enum.Font.GothamBold
+		slotLabel.Parent = slotFrame
+		
+		local relicId = equippedRelics[slotName]
+		if relicId then
+			-- Show equipped relic
+			local relicInfo = Instance.new("TextLabel")
+			relicInfo.Name = "RelicInfo"
+			relicInfo.Size = UDim2.new(0.5, 0, 1, 0)
+			relicInfo.Position = UDim2.new(0.25, 0, 0, 0)
+			relicInfo.BackgroundTransparency = 1
+			relicInfo.Text = "Equipped: " .. relicId:sub(1, 8) .. "..."
+			relicInfo.TextColor3 = Color3.fromRGB(100, 200, 100)
+			relicInfo.TextSize = 14
+			relicInfo.Font = Enum.Font.Gotham
+			relicInfo.Parent = slotFrame
+			
+			-- Unequip button
+			local unequipBtn = Instance.new("TextButton")
+			unequipBtn.Name = "UnequipButton"
+			unequipBtn.Size = UDim2.new(0, 80, 0, 35)
+			unequipBtn.Position = UDim2.new(1, -90, 0.5, -17)
+			unequipBtn.BackgroundColor3 = Color3.fromRGB(180, 80, 80)
+			unequipBtn.Text = "Unequip"
+			unequipBtn.TextColor3 = Color3.new(1, 1, 1)
+			unequipBtn.TextSize = 14
+			unequipBtn.Font = Enum.Font.GothamBold
+			unequipBtn.Parent = slotFrame
+			
+			local unequipCorner = Instance.new("UICorner")
+			unequipCorner.CornerRadius = UDim.new(0, 6)
+			unequipCorner.Parent = unequipBtn
+			
+			local currentSlot = slotName
+			unequipBtn.Activated:Connect(function()
+				animateButtonPress(unequipBtn)
+				LobbyController.UnequipRelic(instanceId, currentSlot)
+			end)
+		else
+			-- Show empty slot
+			local emptyLabel = Instance.new("TextLabel")
+			emptyLabel.Name = "EmptyLabel"
+			emptyLabel.Size = UDim2.new(0.5, 0, 1, 0)
+			emptyLabel.Position = UDim2.new(0.25, 0, 0, 0)
+			emptyLabel.BackgroundTransparency = 1
+			emptyLabel.Text = "Empty"
+			emptyLabel.TextColor3 = Color3.fromRGB(100, 100, 100)
+			emptyLabel.TextSize = 14
+			emptyLabel.Font = Enum.Font.Gotham
+			emptyLabel.Parent = slotFrame
+			
+			-- Equip button (opens relic selection)
+			local equipBtn = Instance.new("TextButton")
+			equipBtn.Name = "EquipButton"
+			equipBtn.Size = UDim2.new(0, 80, 0, 35)
+			equipBtn.Position = UDim2.new(1, -90, 0.5, -17)
+			equipBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 180)
+			equipBtn.Text = "Equip"
+			equipBtn.TextColor3 = Color3.new(1, 1, 1)
+			equipBtn.TextSize = 14
+			equipBtn.Font = Enum.Font.GothamBold
+			equipBtn.Parent = slotFrame
+			
+			local equipCorner = Instance.new("UICorner")
+			equipCorner.CornerRadius = UDim.new(0, 6)
+			equipCorner.Parent = equipBtn
+			
+			local currentSlot = slotName
+			equipBtn.Activated:Connect(function()
+				animateButtonPress(equipBtn)
+				LobbyController.OpenRelicSelection(instanceId, currentSlot)
+			end)
+		end
+	end
+end
+
+-- Populate evolution section
+function LobbyController.PopulateEvolutionSection(detailsUI, instanceId, result)
+	local evolutionFrame = detailsUI:FindFirstChild("EvolutionFrame", true)
+	if not evolutionFrame then return end
+	
+	-- Clear existing items
+	for _, child in ipairs(evolutionFrame:GetChildren()) do
+		if child:IsA("Frame") and child.Name ~= "Template" then
+			child:Destroy()
+		end
+	end
+	
+	local unitData = result.Unit
+	local evolutionData = result.EvolutionData
+	local canEvolve = result.CanEvolve
+	local evolveReason = result.EvolveReason
+	local nextStageXP = result.NextStageXP
+	
+	-- Current stage info
+	local stageInfo = Instance.new("Frame")
+	stageInfo.Name = "StageInfo"
+	stageInfo.Size = UDim2.new(1, 0, 0, 100)
+	stageInfo.BackgroundColor3 = Color3.fromRGB(45, 45, 65)
+	stageInfo.BorderSizePixel = 0
+	stageInfo.Parent = evolutionFrame
+	
+	local stageCorner = Instance.new("UICorner")
+	stageCorner.CornerRadius = UDim.new(0, 8)
+	stageCorner.Parent = stageInfo
+	
+	local stageName = Instance.new("TextLabel")
+	stageName.Name = "StageName"
+	stageName.Size = UDim2.new(1, 0, 0, 30)
+	stageName.Position = UDim2.new(0, 0, 0.1, 0)
+	stageName.BackgroundTransparency = 1
+	stageName.Text = "Stage: " .. (evolutionData and evolutionData.Name or "Base") .. " (" .. (unitData.EvolutionStage or 0) .. ")"
+	stageName.TextColor3 = Color3.new(1, 1, 1)
+	stageName.TextSize = 20
+	stageName.Font = Enum.Font.GothamBold
+	stageName.Parent = stageInfo
+	
+	local xpLabel = Instance.new("TextLabel")
+	xpLabel.Name = "XPLabel"
+	xpLabel.Size = UDim2.new(1, 0, 0, 25)
+	xpLabel.Position = UDim2.new(0, 0, 0.45, 0)
+	xpLabel.BackgroundTransparency = 1
+	xpLabel.Text = "XP: " .. (unitData.XP or 0) .. (nextStageXP and (" / " .. nextStageXP) or " (MAX)")
+	xpLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+	xpLabel.TextSize = 16
+	xpLabel.Font = Enum.Font.Gotham
+	xpLabel.Parent = stageInfo
+	
+	-- Evolve button
+	local evolveBtn = Instance.new("TextButton")
+	evolveBtn.Name = "EvolveButton"
+	evolveBtn.Size = UDim2.new(0.4, 0, 0, 40)
+	evolveBtn.Position = UDim2.new(0.3, 0, 0.7, 0)
+	evolveBtn.BackgroundColor3 = canEvolve and Color3.fromRGB(80, 180, 80) or Color3.fromRGB(80, 80, 80)
+	evolveBtn.Text = canEvolve and "Evolve!" or (evolveReason or "Cannot Evolve")
+	evolveBtn.TextColor3 = Color3.new(1, 1, 1)
+	evolveBtn.TextSize = 16
+	evolveBtn.Font = Enum.Font.GothamBold
+	evolveBtn.Parent = stageInfo
+	
+	local evolveBtnCorner = Instance.new("UICorner")
+	evolveBtnCorner.CornerRadius = UDim.new(0, 8)
+	evolveBtnCorner.Parent = evolveBtn
+	
+	if canEvolve then
+		evolveBtn.Activated:Connect(function()
+			animateButtonPress(evolveBtn)
+			LobbyController.EvolveUnit(instanceId)
+		end)
+	end
+end
+
+-- Reroll a trait
+function LobbyController.RerollTrait(instanceId, traitName)
+	print("LobbyController: Rerolling trait", traitName, "for unit", instanceId)
+	
+	if not RerollTraitFunction then
+		LobbyController.ShowError("Trait reroll not available")
+		return
+	end
+	
+	local result = RerollTraitFunction:InvokeServer(instanceId, traitName)
+	if result.Success then
+		print("LobbyController: Trait rerolled successfully")
+		-- Refresh the unit details
+		LobbyController.OpenUnitDetails(instanceId)
+		-- Refresh inventory to show updated traits
+		LobbyController.LoadInventory()
+	else
+		LobbyController.ShowError(result.Error or "Failed to reroll trait")
+	end
+end
+
+-- Open relic selection for a slot
+function LobbyController.OpenRelicSelection(instanceId, slot)
+	print("LobbyController: Opening relic selection for slot", slot)
+	
+	if not GetRelicInventoryFunction then
+		LobbyController.ShowError("Relic system not available")
+		return
+	end
+	
+	local relics = GetRelicInventoryFunction:InvokeServer()
+	
+	-- Filter relics for this slot
+	local availableRelics = {}
+	for _, relic in ipairs(relics) do
+		if relic.Slot == slot then
+			table.insert(availableRelics, relic)
+		end
+	end
+	
+	if #availableRelics == 0 then
+		LobbyController.ShowError("No relics available for " .. slot .. " slot")
+		return
+	end
+	
+	-- For now, just equip the first available relic
+	-- TODO: Create a proper selection UI
+	local result = EquipRelicFunction:InvokeServer(instanceId, availableRelics[1].ID)
+	if result.Success then
+		print("LobbyController: Relic equipped successfully")
+		LobbyController.OpenUnitDetails(instanceId)
+	else
+		LobbyController.ShowError(result.Error or "Failed to equip relic")
+	end
+end
+
+-- Unequip a relic
+function LobbyController.UnequipRelic(instanceId, slot)
+	print("LobbyController: Unequipping relic from slot", slot)
+	
+	if not UnequipRelicFunction then
+		LobbyController.ShowError("Relic system not available")
+		return
+	end
+	
+	local result = UnequipRelicFunction:InvokeServer(instanceId, slot)
+	if result.Success then
+		print("LobbyController: Relic unequipped successfully")
+		LobbyController.OpenUnitDetails(instanceId)
+	else
+		LobbyController.ShowError(result.Error or "Failed to unequip relic")
+	end
+end
+
+-- Evolve a unit
+function LobbyController.EvolveUnit(instanceId)
+	print("LobbyController: Evolving unit", instanceId)
+	
+	if not EvolveUnitFunction then
+		LobbyController.ShowError("Evolution not available")
+		return
+	end
+	
+	local result = EvolveUnitFunction:InvokeServer(instanceId)
+	if result.Success then
+		print("LobbyController: Unit evolved to stage", result.NewStage)
+		LobbyController.OpenUnitDetails(instanceId)
+		-- Refresh inventory to show updated evolution stage
+		LobbyController.LoadInventory()
+	else
+		LobbyController.ShowError(result.Error or "Failed to evolve unit")
+	end
+end
+
 -- Initialize
 function LobbyController.Initialize()
 	-- Wait for player data to load
@@ -1477,10 +2595,8 @@ function LobbyController.Initialize()
 		invBtn.Button.Activated:Connect(function()
 			animateButtonPress(invBtn)
 			print("LobbyController: InventoryButton clicked!")
-			-- Just toggle visibility, inventory is already preloaded
-			if gui:FindFirstChild("InventoryUI") then
-				gui.InventoryUI.Visible = not gui.InventoryUI.Visible
-			end
+			-- Toggle immersive inventory mode
+			LobbyController.ToggleInventoryMode()
 		end)
 	else
 		warn("LobbyController: InventoryButton not found")
@@ -1616,6 +2732,28 @@ function LobbyController.Initialize()
 	end
 
 	print("Lobby controller initialized")
+	
+	-- Preload inventory mode assets in background
+	task.spawn(function()
+		print("LobbyController: Preloading inventory assets...")
+		local assetsToPreload = {}
+		
+		-- Preload inventory animation
+		local inventoryAnimation = Instance.new("Animation")
+		inventoryAnimation.AnimationId = "rbxassetid://74802924296512"
+		table.insert(assetsToPreload, inventoryAnimation)
+		
+		-- Preload all tower models
+		local towersFolder = ReplicatedStorage:FindFirstChild("Towers")
+		if towersFolder then
+			for _, model in ipairs(towersFolder:GetChildren()) do
+				table.insert(assetsToPreload, model)
+			end
+		end
+		
+		ContentProvider:PreloadAsync(assetsToPreload)
+		print("LobbyController: Inventory assets preloaded")
+	end)
 end
 
 -- Auto-initialize

@@ -126,14 +126,14 @@ function EvolutionSystem.GetXPForNextStage(unitId: string, currentStage: number)
 	return nil -- No next stage or requires trial
 end
 
--- Check if a stage requires a trial
+-- Check if a stage requires a trial 
 function EvolutionSystem.RequiresTrial(unitId: string, stage: number): string?
 	local data = EvolutionSystem.GetStageData(unitId, stage)
 	return data and data.RequiresTrial or nil
 end
 
 -- Check if unit can evolve to next stage
-function EvolutionSystem.CanEvolve(unitId: string, currentXP: number, currentStage: number, completedTrials: {string}?): boolean, string?
+function EvolutionSystem.CanEvolve(unitId: string, currentXP: number, currentStage: number, completedTrials: {string}?): (boolean, string?)
 	local nextStage = currentStage + 1
 	local data = EvolutionSystem.GetStageData(unitId, nextStage)
 	

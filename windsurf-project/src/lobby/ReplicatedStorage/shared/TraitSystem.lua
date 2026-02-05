@@ -11,19 +11,15 @@
 local TraitSystem = {}
 
 -- Trait definitions with categories and effects
+-- NOTE: Units do NOT have Health - they cannot be killed or destroyed
 TraitSystem.Traits = {
 	-- Offensive traits
-	Berserker = {Category = "Offensive", Rarity = "Rare", Effects = {Damage = 0.30, Defense = -0.20}, Description = "+30% damage, -20% defense"},
+	Berserker = {Category = "Offensive", Rarity = "Rare", Effects = {Damage = 0.30}, Description = "+30% damage"},
 	Precision = {Category = "Offensive", Rarity = "Rare", Effects = {CritChance = 15}, Description = "+15% crit chance"},
 	Relentless = {Category = "Offensive", Rarity = "Epic", Effects = {ArmorPen = 0.20}, Description = "+20% armor penetration"},
 	Deadly = {Category = "Offensive", Rarity = "Epic", Effects = {CritDamage = 0.50}, Description = "+50% crit damage"},
 	Savage = {Category = "Offensive", Rarity = "Legendary", Effects = {Damage = 0.20, CritChance = 10, CritDamage = 0.25}, Description = "+20% damage, +10% crit, +25% crit damage"},
-	
-	-- Defensive traits
-	Fortified = {Category = "Defensive", Rarity = "Rare", Effects = {HP = 0.25}, Description = "+25% HP"},
-	Regeneration = {Category = "Defensive", Rarity = "Rare", Effects = {HPRegen = 0.01}, Description = "+1% HP regen per second"},
-	Resilient = {Category = "Defensive", Rarity = "Epic", Effects = {Defense = 0.20, HP = 0.10}, Description = "+20% defense, +10% HP"},
-	Unyielding = {Category = "Defensive", Rarity = "Legendary", Effects = {HP = 0.30, Defense = 0.15, HPRegen = 0.005}, Description = "+30% HP, +15% defense, +0.5% regen"},
+	Focused = {Category = "Offensive", Rarity = "Rare", Effects = {Damage = 0.15, AttackSpeed = 0.10}, Description = "+15% damage, +10% attack speed"},
 	
 	-- Utility traits
 	Swift = {Category = "Utility", Rarity = "Common", Effects = {AttackSpeed = 0.15}, Description = "+15% attack speed"},
@@ -31,11 +27,15 @@ TraitSystem.Traits = {
 	Economy = {Category = "Utility", Rarity = "Rare", Effects = {CashBonus = 0.10}, Description = "+10% cash from kills"},
 	Experienced = {Category = "Utility", Rarity = "Rare", Effects = {XPBonus = 0.25}, Description = "+25% XP gain"},
 	Tactical = {Category = "Utility", Rarity = "Epic", Effects = {AttackSpeed = 0.10, Range = 0.10, CooldownReduction = 0.10}, Description = "+10% speed, range, and CDR"},
+	Efficient = {Category = "Utility", Rarity = "Common", Effects = {CooldownReduction = 0.15}, Description = "+15% ability cooldown reduction"},
+	Sniper = {Category = "Utility", Rarity = "Rare", Effects = {Range = 0.30, AttackSpeed = -0.10}, Description = "+30% range, -10% attack speed"},
 	
 	-- Special traits
 	Elemental = {Category = "Special", Rarity = "Epic", Effects = {TypeDamageBonus = 0.15}, Description = "+15% type advantage damage"},
-	Vampiric = {Category = "Special", Rarity = "Epic", Effects = {Lifesteal = 0.10}, Description = "+10% lifesteal"},
 	Lucky = {Category = "Special", Rarity = "Legendary", Effects = {CritChance = 10, CashBonus = 0.15, XPBonus = 0.15}, Description = "+10% crit, +15% cash and XP"},
+	Splasher = {Category = "Special", Rarity = "Epic", Effects = {SplashRadius = 0.25}, Description = "+25% splash damage radius"},
+	Hunter = {Category = "Special", Rarity = "Rare", Effects = {BossDamage = 0.20}, Description = "+20% damage vs bosses"},
+	Executioner = {Category = "Special", Rarity = "Legendary", Effects = {Damage = 0.15, BossDamage = 0.25, CritDamage = 0.20}, Description = "+15% damage, +25% vs bosses, +20% crit damage"},
 }
 
 -- Rarity weights for trait generation
@@ -56,7 +56,7 @@ TraitSystem.CountByRarity = {
 }
 
 -- Categories that can't have multiple traits
-TraitSystem.ExclusiveCategories = {"Offensive", "Defensive", "Special"}
+TraitSystem.ExclusiveCategories = {"Offensive", "Special"}
 
 -- Get trait definition
 function TraitSystem.GetTrait(traitName: string): {[string]: any}?

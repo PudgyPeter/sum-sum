@@ -36,6 +36,9 @@ local SummoningSystem = require(script.Parent.SummoningSystem)
 local TeleportManager = require(script.Parent.TeleportManager)
 local MapProgressService = require(script.Parent.MapProgressService)
 local PartyService = require(script.Parent.PartyService)
+local TraitSystem = require(Shared:WaitForChild("TraitSystem"))
+local RelicSystem = require(Shared:WaitForChild("RelicSystem"))
+local EvolutionSystem = require(Shared:WaitForChild("EvolutionSystem"))
 
 -- Get pre-created RemoteEvents and RemoteFunctions folders
 local events = ReplicatedStorage:WaitForChild("Events")
@@ -171,6 +174,215 @@ SetLoadoutSlotFunction.OnServerInvoke = function(player, towerId, slotNumber)
 	local success, result = PlayerDataManager.AddToLoadout(player, towerId, slotNumber)
 	print("[LobbyServer] AddToLoadout result - success:", success, "result:", result)
 	return success, result
+end
+
+--------------------------------------------------------------------------------
+-- UNIT MANAGEMENT FUNCTIONS
+--------------------------------------------------------------------------------
+
+-- Create remote functions for unit management (if they don't exist)
+local function getOrCreateFunction(name)
+	local func = functions:FindFirstChild(name)
+	if not func then
+		func = Instance.new("RemoteFunction")
+		func.Name = name
+		func.Parent = functions
+	end
+	return func
+end
+
+local GetUnitDetailsFunction = getOrCreateFunction("GetUnitDetails")
+local RerollTraitFunction = getOrCreateFunction("RerollTrait")
+local GetRelicInventoryFunction = getOrCreateFunction("GetRelicInventory")
+local EquipRelicFunction = getOrCreateFunction("EquipRelic")
+local UnequipRelicFunction = getOrCreateFunction("UnequipRelic")
+local EvolveUnitFunction = getOrCreateFunction("EvolveUnit")
+local GetEvolutionInfoFunction = getOrCreateFunction("GetEvolutionInfo")
+
+-- Get unit details handler
+GetUnitDetailsFunction.OnServerInvoke = function(player, instanceId)
+	local unitData = PlayerDataManager.GetUnitInstance(player, instanceId)
+	if not unitData then
+		return {Success = false, Error = "Unit not found"}
+	end
+	
+	-- Add trait descriptions
+	local traitDescriptions = TraitSystem.GetDescriptions(unitData.Traits or {})
+	local traitBonuses = TraitSystem.Calculate(unitData.Traits or {})
+	
+	-- Add evolution info
+	local evolutionData = EvolutionSystem.GetStageData(unitData.UnitId, unitData.EvolutionStage or 0)
+	local nextStageXP = EvolutionSystem.GetXPForNextStage(unitData.UnitId, unitData.EvolutionStage or 0)
+	local canEvolve, evolveReason = EvolutionSystem.CanEvolve(unitData.UnitId, unitData.XP or 0, unitData.EvolutionStage or 0)
+	
+	return {
+		Success = true,
+		Unit = unitData,
+		TraitDescriptions = traitDescriptions,
+		TraitBonuses = traitBonuses,
+		EvolutionData = evolutionData,
+		NextStageXP = nextStageXP,
+		CanEvolve = canEvolve,
+		EvolveReason = evolveReason,
+	}
+end
+
+-- Reroll trait handler
+RerollTraitFunction.OnServerInvoke = function(player, instanceId, traitToReroll)
+	local unitData = PlayerDataManager.GetUnitInstance(player, instanceId)
+	if not unitData then
+		return {Success = false, Error = "Unit not found"}
+	end
+	
+	-- Check if trait exists on unit
+	if not table.find(unitData.Traits or {}, traitToReroll) then
+		return {Success = false, Error = "Trait not found on unit"}
+	end
+	
+	-- Check cost
+	local cost = GameConfig.Traits.RerollCost
+	if not PlayerDataManager.CanAfford(player, "Coins", cost) then
+		return {Success = false, Error = "Not enough Coins (need " .. cost .. ")"}
+	end
+	
+	-- Deduct cost
+	PlayerDataManager.ModifyCurrency(player, "Coins", -cost)
+	
+	-- Reroll the trait
+	local newTraits = TraitSystem.Reroll(unitData.Traits, traitToReroll, unitData.Rarity or "Common")
+	PlayerDataManager.UpdateUnitTraits(player, instanceId, newTraits)
+	
+	-- Get updated unit data
+	local updatedUnit = PlayerDataManager.GetUnitInstance(player, instanceId)
+	
+	return {
+		Success = true,
+		NewTraits = newTraits,
+		TraitDescriptions = TraitSystem.GetDescriptions(newTraits),
+		TraitBonuses = TraitSystem.Calculate(newTraits),
+		Unit = updatedUnit,
+	}
+end
+
+--------------------------------------------------------------------------------
+-- RELIC FUNCTIONS
+--------------------------------------------------------------------------------
+
+-- Get relic inventory handler
+GetRelicInventoryFunction.OnServerInvoke = function(player)
+	return PlayerDataManager.GetRelicInventory(player)
+end
+
+-- Equip relic handler
+EquipRelicFunction.OnServerInvoke = function(player, instanceId, relicId)
+	-- Get the relic
+	local relic = PlayerDataManager.GetRelic(player, relicId)
+	if not relic then
+		return {Success = false, Error = "Relic not found"}
+	end
+	
+	-- Get the unit
+	local unitData = PlayerDataManager.GetUnitInstance(player, instanceId)
+	if not unitData then
+		return {Success = false, Error = "Unit not found"}
+	end
+	
+	-- Equip the relic
+	local success = PlayerDataManager.EquipRelic(player, instanceId, relicId, relic.Slot)
+	if success then
+		return {Success = true, Slot = relic.Slot}
+	else
+		return {Success = false, Error = "Failed to equip relic"}
+	end
+end
+
+-- Unequip relic handler
+UnequipRelicFunction.OnServerInvoke = function(player, instanceId, slot)
+	local success = PlayerDataManager.UnequipRelic(player, instanceId, slot)
+	if success then
+		return {Success = true}
+	else
+		return {Success = false, Error = "Failed to unequip relic"}
+	end
+end
+
+--------------------------------------------------------------------------------
+-- EVOLUTION FUNCTIONS
+--------------------------------------------------------------------------------
+
+-- Get evolution info handler
+GetEvolutionInfoFunction.OnServerInvoke = function(player, instanceId)
+	local unitData = PlayerDataManager.GetUnitInstance(player, instanceId)
+	if not unitData then
+		return {Success = false, Error = "Unit not found"}
+	end
+	
+	local currentStage = unitData.EvolutionStage or 0
+	local xp = unitData.XP or 0
+	
+	-- Get all stage data for this unit
+	local stages = {}
+	for i = 0, EvolutionSystem.MaxStageWithTrial do
+		local stageData = EvolutionSystem.GetStageData(unitData.UnitId, i)
+		if stageData then
+			stages[i] = stageData
+		end
+	end
+	
+	local canEvolve, evolveReason = EvolutionSystem.CanEvolve(unitData.UnitId, xp, currentStage)
+	local progress = EvolutionSystem.GetProgress(unitData.UnitId, xp, currentStage)
+	
+	return {
+		Success = true,
+		CurrentStage = currentStage,
+		XP = xp,
+		Stages = stages,
+		CanEvolve = canEvolve,
+		EvolveReason = evolveReason,
+		Progress = progress,
+	}
+end
+
+-- Evolve unit handler
+EvolveUnitFunction.OnServerInvoke = function(player, instanceId)
+	local unitData = PlayerDataManager.GetUnitInstance(player, instanceId)
+	if not unitData then
+		return {Success = false, Error = "Unit not found"}
+	end
+	
+	local currentStage = unitData.EvolutionStage or 0
+	local xp = unitData.XP or 0
+	
+	-- Check if can evolve
+	local canEvolve, reason = EvolutionSystem.CanEvolve(unitData.UnitId, xp, currentStage)
+	if not canEvolve then
+		return {Success = false, Error = reason or "Cannot evolve"}
+	end
+	
+	-- Check cost if any
+	local cost = GameConfig.Evolution.EvolveCost
+	if cost > 0 then
+		local currency = GameConfig.Evolution.EvolveCurrency
+		if not PlayerDataManager.CanAfford(player, currency, cost) then
+			return {Success = false, Error = "Not enough " .. currency .. " (need " .. cost .. ")"}
+		end
+		PlayerDataManager.ModifyCurrency(player, currency, -cost)
+	end
+	
+	-- Evolve the unit
+	local newStage = currentStage + 1
+	local success = PlayerDataManager.SetEvolutionStage(player, instanceId, newStage)
+	
+	if success then
+		local newStageData = EvolutionSystem.GetStageData(unitData.UnitId, newStage)
+		return {
+			Success = true,
+			NewStage = newStage,
+			StageData = newStageData,
+		}
+	else
+		return {Success = false, Error = "Failed to evolve unit"}
+	end
 end
 
 print("Lobby server initialized")

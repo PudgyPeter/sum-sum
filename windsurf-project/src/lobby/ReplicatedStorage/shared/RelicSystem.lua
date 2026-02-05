@@ -16,26 +16,17 @@ local RelicSystem = {}
 RelicSystem.Slots = {"Weapon", "Armor", "Accessory", "Artifact"}
 
 -- Set bonuses (2-piece and 4-piece)
+-- NOTE: Units do NOT have Health - they cannot be killed or destroyed
 RelicSystem.Sets = {
 	Warrior = {
 		[2] = {Damage = 0.15},
 		[4] = {Damage = 0.30, ArmorPen = 0.10},
 		Description = "Offensive set focused on raw damage",
 	},
-	Guardian = {
-		[2] = {HP = 0.20},
-		[4] = {HP = 0.40, Reflect = 0.05},
-		Description = "Defensive set for tankiness",
-	},
 	Swift = {
 		[2] = {AttackSpeed = 0.10},
 		[4] = {AttackSpeed = 0.25},
 		Description = "Speed-focused set",
-	},
-	Vampire = {
-		[2] = {Lifesteal = 0.05},
-		[4] = {Lifesteal = 0.15},
-		Description = "Sustain through lifesteal",
 	},
 	Precision = {
 		[2] = {CritChance = 10},
@@ -51,6 +42,16 @@ RelicSystem.Sets = {
 		[2] = {CashBonus = 0.10},
 		[4] = {CashBonus = 0.25, XPBonus = 0.15},
 		Description = "Economy focused",
+	},
+	Slayer = {
+		[2] = {BossDamage = 0.15},
+		[4] = {BossDamage = 0.30, Damage = 0.10},
+		Description = "Boss-killing focused",
+	},
+	Bombardier = {
+		[2] = {SplashRadius = 0.15},
+		[4] = {SplashRadius = 0.30, Damage = 0.10},
+		Description = "Area damage focused",
 	},
 }
 
@@ -73,38 +74,39 @@ RelicSystem.SubstatCount = {
 }
 
 -- Main stats by slot
+-- NOTE: Units do NOT have Health - they cannot be killed or destroyed
 RelicSystem.MainStats = {
 	Weapon = {"Damage", "CritDamage"},
-	Armor = {"HP", "Defense"},
+	Armor = {"AttackSpeed", "CooldownReduction"},
 	Accessory = {"CritChance", "Range"},
-	Artifact = {"CooldownReduction", "AbilityDamage"},
+	Artifact = {"AbilityDamage", "BossDamage"},
 }
 
--- Substat pool
-RelicSystem.SubstatPool = {"Damage", "HP", "AttackSpeed", "CritChance", "CritDamage", "Range", "Defense", "Lifesteal"}
+-- Substat pool (no HP/Defense/Lifesteal - units don't have health)
+RelicSystem.SubstatPool = {"Damage", "AttackSpeed", "CritChance", "CritDamage", "Range", "ArmorPen", "BossDamage", "SplashRadius"}
 
 -- Base values for main stats
 RelicSystem.MainStatBaseValues = {
 	Damage = 10,
 	CritDamage = 0.15,
-	HP = 100,
-	Defense = 10,
+	AttackSpeed = 0.08,
 	CritChance = 5,
 	Range = 5,
 	CooldownReduction = 0.05,
 	AbilityDamage = 0.10,
+	BossDamage = 0.10,
 }
 
--- Base values for substats (typically 50% of main stat)
+-- Base values for substats
 RelicSystem.SubstatBaseValues = {
 	Damage = 5,
-	HP = 50,
 	AttackSpeed = 0.03,
 	CritChance = 3,
 	CritDamage = 0.08,
 	Range = 2,
-	Defense = 5,
-	Lifesteal = 0.02,
+	ArmorPen = 0.05,
+	BossDamage = 0.05,
+	SplashRadius = 0.08,
 }
 
 -- Generate a new relic

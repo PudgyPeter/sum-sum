@@ -133,7 +133,7 @@ function EvolutionSystem.RequiresTrial(unitId: string, stage: number): string?
 end
 
 -- Check if unit can evolve to next stage
-function EvolutionSystem.CanEvolve(unitId: string, currentXP: number, currentStage: number, completedTrials: {string}?): boolean, string?
+function EvolutionSystem.CanEvolve(unitId: string, currentXP: number, currentStage: number, completedTrials: {string}?): (boolean, string?)
 	local nextStage = currentStage + 1
 	local data = EvolutionSystem.GetStageData(unitId, nextStage)
 	

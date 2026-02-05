@@ -758,15 +758,11 @@ function PlayerDataManager.GetInventory(player)
 	end
 	
 	local towers = {}
-	local children = unitInstances:GetChildren()
-	print("[PlayerData] GetInventory: Found", #children, "children in UnitInstances folder for", player.Name)
 	
-	for _, instance in ipairs(children) do
-		print("[PlayerData] GetInventory: Checking child:", instance.Name, "Class:", instance.ClassName)
+	for _, instance in ipairs(unitInstances:GetChildren()) do
 		if instance:IsA("Folder") then
 			local unitId = instance:GetAttribute("UnitId")
 			local rarity = instance:GetAttribute("Rarity")
-			print("[PlayerData] GetInventory: Instance", instance.Name, "UnitId:", unitId, "Rarity:", rarity)
 			
 			-- Get traits
 			local traits = {}
@@ -1203,6 +1199,119 @@ function PlayerDataManager.UnequipRelic(player, instanceId, slot)
 	end
 	
 	return false
+end
+
+-- Get all relics in inventory
+function PlayerDataManager.GetRelicInventory(player)
+	local playerData = player:FindFirstChild("PlayerData")
+	if not playerData then return {} end
+	
+	local relicInventory = playerData:FindFirstChild("RelicInventory")
+	if not relicInventory then return {} end
+	
+	local relics = {}
+	for _, relicFolder in ipairs(relicInventory:GetChildren()) do
+		if relicFolder:IsA("Folder") then
+			local relicData = {
+				ID = relicFolder.Name,
+				Slot = relicFolder:GetAttribute("Slot"),
+				Rarity = relicFolder:GetAttribute("Rarity"),
+				Set = relicFolder:GetAttribute("Set"),
+				MainStat = relicFolder:GetAttribute("MainStat"),
+				MainValue = relicFolder:GetAttribute("MainValue"),
+				Level = relicFolder:GetAttribute("Level") or 0,
+				MaxLevel = relicFolder:GetAttribute("MaxLevel") or 8,
+				Substats = {},
+			}
+			
+			local substats = relicFolder:FindFirstChild("Substats")
+			if substats then
+				for _, substat in ipairs(substats:GetChildren()) do
+					if substat:IsA("NumberValue") then
+						relicData.Substats[substat.Name] = substat.Value
+					end
+				end
+			end
+			
+			table.insert(relics, relicData)
+		end
+	end
+	
+	return relics
+end
+
+-- Get a specific relic by ID
+function PlayerDataManager.GetRelic(player, relicId)
+	local playerData = player:FindFirstChild("PlayerData")
+	if not playerData then return nil end
+	
+	local relicInventory = playerData:FindFirstChild("RelicInventory")
+	if not relicInventory then return nil end
+	
+	local relicFolder = relicInventory:FindFirstChild(relicId)
+	if not relicFolder then return nil end
+	
+	local relicData = {
+		ID = relicFolder.Name,
+		Slot = relicFolder:GetAttribute("Slot"),
+		Rarity = relicFolder:GetAttribute("Rarity"),
+		Set = relicFolder:GetAttribute("Set"),
+		MainStat = relicFolder:GetAttribute("MainStat"),
+		MainValue = relicFolder:GetAttribute("MainValue"),
+		Level = relicFolder:GetAttribute("Level") or 0,
+		MaxLevel = relicFolder:GetAttribute("MaxLevel") or 8,
+		Substats = {},
+	}
+	
+	local substats = relicFolder:FindFirstChild("Substats")
+	if substats then
+		for _, substat in ipairs(substats:GetChildren()) do
+			if substat:IsA("NumberValue") then
+				relicData.Substats[substat.Name] = substat.Value
+			end
+		end
+	end
+	
+	return relicData
+end
+
+--------------------------------------------------------------------------------
+-- EVOLUTION MANAGEMENT
+--------------------------------------------------------------------------------
+
+-- Update unit evolution stage
+function PlayerDataManager.SetEvolutionStage(player, instanceId, stage)
+	local playerData = player:FindFirstChild("PlayerData")
+	if not playerData then return false end
+	
+	local unitInstances = playerData:FindFirstChild("UnitInstances")
+	if not unitInstances then return false end
+	
+	local instance = unitInstances:FindFirstChild(instanceId)
+	if not instance then return false end
+	
+	instance:SetAttribute("EvolutionStage", stage)
+	print("[PlayerData] Set evolution stage for", instanceId, "to", stage)
+	return true
+end
+
+-- Add XP to unit
+function PlayerDataManager.AddUnitXP(player, instanceId, xpAmount)
+	local playerData = player:FindFirstChild("PlayerData")
+	if not playerData then return false, 0 end
+	
+	local unitInstances = playerData:FindFirstChild("UnitInstances")
+	if not unitInstances then return false, 0 end
+	
+	local instance = unitInstances:FindFirstChild(instanceId)
+	if not instance then return false, 0 end
+	
+	local currentXP = instance:GetAttribute("XP") or 0
+	local newXP = currentXP + xpAmount
+	instance:SetAttribute("XP", newXP)
+	
+	print("[PlayerData] Added", xpAmount, "XP to", instanceId, "- now has", newXP)
+	return true, newXP
 end
 
 return PlayerDataManager
