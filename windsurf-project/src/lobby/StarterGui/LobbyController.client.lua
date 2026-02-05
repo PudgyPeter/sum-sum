@@ -82,8 +82,7 @@ local savedSky = nil
 local savedAtmosphere = nil
 local hiddenGUIsForInventory = {}
 local inventoryDisplayModel = nil -- Currently displayed unit model in inventory mode
-local inventoryMirrorPart = nil -- Mirror surface under the model
-local inventoryMirrorModel = nil -- Cloned model for reflection
+local inventoryMirrorModel = nil -- Cloned model for reflection (upside-down)
 local inventoryRotationConnection = nil -- Connection for rotating the model
 local inventoryModelRotation = 180 -- Current Y rotation in degrees
 
@@ -633,7 +632,7 @@ local function SpawnInventoryDisplayModel(unitId)
 	end
 	
 	-- Position the model at the specified location
-	local displayPosition = Vector3.new(0.462, 598.971, 1196.625)
+	local displayPosition = Vector3.new(0.664, 598.971, 1195.967)
 	
 	-- Ensure model has a PrimaryPart
 	if not modelClone.PrimaryPart then
@@ -643,11 +642,10 @@ local function SpawnInventoryDisplayModel(unitId)
 		end
 	end
 	
-	-- Anchor all parts to prevent physics jitter
-	for _, part in ipairs(modelClone:GetDescendants()) do
-		if part:IsA("BasePart") then
-			part.Anchored = true
-		end
+	-- Only anchor root part to allow animations to play
+	local rootPart = modelClone:FindFirstChild("HumanoidRootPart") or modelClone.PrimaryPart
+	if rootPart then
+		rootPart.Anchored = true
 	end
 	
 	-- Use PivotTo for smooth positioning
@@ -657,79 +655,52 @@ local function SpawnInventoryDisplayModel(unitId)
 	modelClone.Parent = workspace
 	inventoryDisplayModel = modelClone
 	
-	-- Set up ViewportFrame reflection as ScreenGui overlay (more reliable than SurfaceGui)
+	-- Create simple reflection: upside-down clone at the feet
 	if inventoryMirrorModel then
 		inventoryMirrorModel:Destroy()
 		inventoryMirrorModel = nil
 	end
 	
-	-- Clean up existing mirror GUI
-	local existingMirrorGui = gui:FindFirstChild("MirrorReflectionGui")
-	if existingMirrorGui then
-		existingMirrorGui:Destroy()
-	end
-	
-	-- Create ScreenGui for the reflection overlay
-	local mirrorGui = Instance.new("ScreenGui")
-	mirrorGui.Name = "MirrorReflectionGui"
-	mirrorGui.DisplayOrder = -1 -- Behind other UI
-	mirrorGui.IgnoreGuiInset = true
-	mirrorGui.Parent = gui
-	inventoryMirrorPart = mirrorGui -- Reuse variable for cleanup
-	
-	-- Create ViewportFrame positioned at bottom of screen
-	local viewportFrame = Instance.new("ViewportFrame")
-	viewportFrame.Name = "ReflectionViewport"
-	viewportFrame.Size = UDim2.new(1, 0, 0.4, 0) -- Bottom 40% of screen
-	viewportFrame.Position = UDim2.new(0, 0, 0.6, 0)
-	viewportFrame.BackgroundTransparency = 0.5
-	viewportFrame.BackgroundColor3 = Color3.fromRGB(40, 60, 80)
-	viewportFrame.ImageTransparency = 0.3
-	viewportFrame.Ambient = Color3.fromRGB(200, 200, 200)
-	viewportFrame.LightColor = Color3.fromRGB(255, 255, 255)
-	viewportFrame.LightDirection = Vector3.new(0, -1, -0.5)
-	viewportFrame.Parent = mirrorGui
-	
-	-- Add gradient for fade effect
-	local gradient = Instance.new("UIGradient")
-	gradient.Transparency = NumberSequence.new({
-		NumberSequenceKeypoint.new(0, 0),
-		NumberSequenceKeypoint.new(0.3, 0.3),
-		NumberSequenceKeypoint.new(1, 0.8)
-	})
-	gradient.Rotation = 90
-	gradient.Parent = viewportFrame
-	
-	-- Create WorldModel for the reflection
-	local worldModel = Instance.new("WorldModel")
-	worldModel.Parent = viewportFrame
-	
-	-- Clone the model for reflection (flipped upside down)
+	-- Clone the model for reflection
 	local reflectionClone = modelClone:Clone()
-	reflectionClone.Name = "ReflectionModel"
+	reflectionClone.Name = "InventoryReflectionModel"
 	
 	-- Remove scripts and VFX from reflection
 	for _, obj in ipairs(reflectionClone:GetDescendants()) do
-		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") then
+		if obj:IsA("Script") or obj:IsA("LocalScript") or obj:IsA("ParticleEmitter") or obj:IsA("Beam") or obj:IsA("Trail") or obj:IsA("Fire") or obj:IsA("Smoke") or obj:IsA("Sparkles") then
 			obj:Destroy()
 		end
 	end
+	local placementVFX = reflectionClone:FindFirstChild("PlacementVFX", true)
+	if placementVFX then
+		placementVFX:Destroy()
+	end
 	
-	reflectionClone.Parent = worldModel
+	-- Make all parts semi-transparent for reflection effect
+	for _, part in ipairs(reflectionClone:GetDescendants()) do
+		if part:IsA("BasePart") then
+			part.Transparency = math.max(part.Transparency, 0.5)
+			part.CanCollide = false
+			part.CastShadow = false
+		end
+	end
+	
+	-- Only anchor root part of reflection to allow animation
+	local reflectionRoot = reflectionClone:FindFirstChild("HumanoidRootPart") or reflectionClone.PrimaryPart
+	if reflectionRoot then
+		reflectionRoot.Anchored = true
+	end
+	
+	-- Position reflection upside-down at the feet (flipped on Z axis for mirror effect)
+	local modelHeight = 3.6 -- Approximate height of model
+	reflectionClone:PivotTo(CFrame.new(displayPosition - Vector3.new(0, modelHeight, 0)) * CFrame.Angles(0, math.rad(inventoryModelRotation), math.rad(180)))
+	
+	reflectionClone.Parent = workspace
 	inventoryMirrorModel = reflectionClone
 	
-	-- Position reflection at origin, flipped upside down for mirror effect
-	reflectionClone:PivotTo(CFrame.new(0, -3, 0) * CFrame.Angles(math.rad(180), 0, 0))
+	print("LobbyController: Simple reflection clone created")
 	
-	-- Setup camera for the viewport - looking down at the flipped model
-	local viewportCamera = Instance.new("Camera")
-	viewportCamera.Parent = viewportFrame
-	viewportFrame.CurrentCamera = viewportCamera
-	viewportCamera.CFrame = CFrame.new(Vector3.new(0, 5, 8), Vector3.new(0, -2, 0))
-	
-	print("LobbyController: Mirror reflection created (ScreenGui overlay)")
-	
-	-- Play animation if model has a Humanoid
+	-- Play animation on main model
 	local humanoid = modelClone:FindFirstChildOfClass("Humanoid")
 	if humanoid then
 		local animator = humanoid:FindFirstChildOfClass("Animator")
@@ -746,6 +717,23 @@ local function SpawnInventoryDisplayModel(unitId)
 		animTrack:Play()
 	end
 	
+	-- Play animation on reflection model
+	local reflectionHumanoid = reflectionClone:FindFirstChildOfClass("Humanoid")
+	if reflectionHumanoid then
+		local reflectionAnimator = reflectionHumanoid:FindFirstChildOfClass("Animator")
+		if not reflectionAnimator then
+			reflectionAnimator = Instance.new("Animator")
+			reflectionAnimator.Parent = reflectionHumanoid
+		end
+		
+		local reflectionAnimation = Instance.new("Animation")
+		reflectionAnimation.AnimationId = "rbxassetid://74802924296512"
+		
+		local reflectionAnimTrack = reflectionAnimator:LoadAnimation(reflectionAnimation)
+		reflectionAnimTrack.Looped = true
+		reflectionAnimTrack:Play()
+	end
+	
 	-- Set up mouse drag rotation
 	local UserInputService = game:GetService("UserInputService")
 	local isDragging = false
@@ -759,12 +747,13 @@ local function SpawnInventoryDisplayModel(unitId)
 	
 	local function updateModelRotation()
 		if inventoryDisplayModel then
-			local displayPosition = Vector3.new(0.462, 598.971, 1196.625)
+			local displayPosition = Vector3.new(0.664, 598.971, 1195.967)
 			inventoryDisplayModel:PivotTo(CFrame.new(displayPosition) * CFrame.Angles(0, math.rad(inventoryModelRotation), 0))
 			
-			-- Update mirror reflection rotation (model is at origin in ViewportFrame)
+			-- Also rotate the reflection clone (upside down on Z axis)
 			if inventoryMirrorModel then
-				inventoryMirrorModel:PivotTo(CFrame.new(0, 0, 0) * CFrame.Angles(math.rad(180), math.rad(inventoryModelRotation), 0))
+				local modelHeight = 3.6
+				inventoryMirrorModel:PivotTo(CFrame.new(displayPosition - Vector3.new(0, modelHeight, 0)) * CFrame.Angles(0, math.rad(inventoryModelRotation), math.rad(180)))
 			end
 		end
 	end
@@ -1838,13 +1827,10 @@ function LobbyController.CloseInventoryMode()
 		inventoryDisplayModel = nil
 	end
 	
-	-- Clean up mirror reflection ScreenGui
-	if inventoryMirrorPart then
-		inventoryMirrorPart:Destroy() -- This is now the ScreenGui
-		inventoryMirrorPart = nil
-	end
+	-- Clean up reflection clone
 	if inventoryMirrorModel then
-		inventoryMirrorModel = nil -- Already destroyed with ScreenGui
+		inventoryMirrorModel:Destroy()
+		inventoryMirrorModel = nil
 	end
 	
 	-- Hide inventory UI
