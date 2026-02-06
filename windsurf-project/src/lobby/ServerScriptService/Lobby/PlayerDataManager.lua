@@ -1314,4 +1314,74 @@ function PlayerDataManager.AddUnitXP(player, instanceId, xpAmount)
 	return true, newXP
 end
 
+--------------------------------------------------------------------------------
+-- SELL UNITS
+--------------------------------------------------------------------------------
+
+-- Sell multiple units at once, returns total coins earned
+function PlayerDataManager.SellUnits(player, instanceIds)
+	if not instanceIds or #instanceIds == 0 then
+		return false, 0, "No units to sell"
+	end
+	
+	local playerData = player:FindFirstChild("PlayerData")
+	if not playerData then return false, 0, "No player data" end
+	
+	local unitInstances = playerData:FindFirstChild("UnitInstances")
+	if not unitInstances then return false, 0, "No unit instances" end
+	
+	local loadout = playerData:FindFirstChild("Loadout")
+	local loadoutInstanceIds = {}
+	if loadout then
+		for _, slot in ipairs(loadout:GetChildren()) do
+			if slot:IsA("StringValue") and slot.Value ~= "" then
+				loadoutInstanceIds[slot.Value] = true
+			end
+		end
+	end
+	
+	local totalCoins = 0
+	local soldCount = 0
+	local skippedLocked = 0
+	local skippedLoadout = 0
+	
+	for _, instanceId in ipairs(instanceIds) do
+		local instance = unitInstances:FindFirstChild(instanceId)
+		if instance then
+			-- Check if locked
+			if instance:GetAttribute("Locked") then
+				skippedLocked = skippedLocked + 1
+				continue
+			end
+			
+			-- Check if in loadout
+			if loadoutInstanceIds[instanceId] then
+				skippedLoadout = skippedLoadout + 1
+				continue
+			end
+			
+			-- Get rarity and calculate coins
+			local rarity = instance:GetAttribute("Rarity") or "Common"
+			local coinValue = GameConfig.Selling.CoinRates[rarity] or 5
+			
+			-- Delete the unit
+			instance:Destroy()
+			
+			totalCoins = totalCoins + coinValue
+			soldCount = soldCount + 1
+		end
+	end
+	
+	-- Add coins to player
+	if totalCoins > 0 then
+		local coinsValue = playerData:FindFirstChild("Coins")
+		if coinsValue then
+			coinsValue.Value = coinsValue.Value + totalCoins
+		end
+	end
+	
+	print("[PlayerData] Sold", soldCount, "units for", totalCoins, "coins. Skipped:", skippedLocked, "locked,", skippedLoadout, "in loadout")
+	return true, totalCoins, soldCount, skippedLocked, skippedLoadout
+end
+
 return PlayerDataManager

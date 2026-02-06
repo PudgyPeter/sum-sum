@@ -198,6 +198,8 @@ local EquipRelicFunction = getOrCreateFunction("EquipRelic")
 local UnequipRelicFunction = getOrCreateFunction("UnequipRelic")
 local EvolveUnitFunction = getOrCreateFunction("EvolveUnit")
 local GetEvolutionInfoFunction = getOrCreateFunction("GetEvolutionInfo")
+local SellUnitsFunction = getOrCreateFunction("SellUnits")
+local LockUnitFunction = getOrCreateFunction("LockUnit")
 
 -- Get unit details handler
 GetUnitDetailsFunction.OnServerInvoke = function(player, instanceId)
@@ -262,6 +264,46 @@ RerollTraitFunction.OnServerInvoke = function(player, instanceId, traitToReroll)
 		TraitBonuses = TraitSystem.Calculate(newTraits),
 		Unit = updatedUnit,
 	}
+end
+
+--------------------------------------------------------------------------------
+-- SELL & LOCK FUNCTIONS
+--------------------------------------------------------------------------------
+
+-- Sell units handler
+SellUnitsFunction.OnServerInvoke = function(player, instanceIds)
+	if not instanceIds or type(instanceIds) ~= "table" then
+		return {Success = false, Error = "Invalid instance IDs"}
+	end
+	
+	local success, totalCoins, soldCount, skippedLocked, skippedLoadout = PlayerDataManager.SellUnits(player, instanceIds)
+	
+	if success then
+		return {
+			Success = true,
+			TotalCoins = totalCoins,
+			SoldCount = soldCount,
+			SkippedLocked = skippedLocked,
+			SkippedLoadout = skippedLoadout,
+		}
+	else
+		return {Success = false, Error = totalCoins} -- totalCoins contains error message on failure
+	end
+end
+
+-- Lock/unlock unit handler
+LockUnitFunction.OnServerInvoke = function(player, instanceId, locked)
+	if not instanceId then
+		return {Success = false, Error = "Invalid instance ID"}
+	end
+	
+	local success = PlayerDataManager.SetUnitLocked(player, instanceId, locked)
+	
+	if success then
+		return {Success = true, Locked = locked}
+	else
+		return {Success = false, Error = "Failed to update lock status"}
+	end
 end
 
 --------------------------------------------------------------------------------
