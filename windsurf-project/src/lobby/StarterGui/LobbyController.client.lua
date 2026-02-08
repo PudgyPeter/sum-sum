@@ -89,7 +89,9 @@ local savedClockTime = nil
 local hiddenGUIsForInventory = {}
 local inventoryDisplayModel = nil -- Currently displayed unit model in inventory mode
 local inventoryMirrorModel = nil -- Cloned model for reflection (upside-down)
-local inventoryRotationConnection = nil -- Connection for rotating the model
+local inventoryFeetToRoot = 0 -- Distance from root to feet (calculated per model)
+local reflectionRippleConnection = nil -- Connection for subtle water ripple on reflection
+local inventoryDepthOfField = nil -- DepthOfField effect for inventory mode
 local inventoryModelRotation = 160 -- Current Y rotation in degrees (200 = slightly facing left)
 
 -- Sell mode state variables
@@ -786,12 +788,48 @@ local function SpawnInventoryDisplayModel(unitId)
 		placementVFX:Destroy()
 	end
 
-	-- Make all parts semi-transparent for reflection effect
+	-- Vertical squash: Y-scale ~0.7 instantly reads as "water reflection"
 	for _, part in ipairs(reflectionClone:GetDescendants()) do
 		if part:IsA("BasePart") then
-			part.Transparency = math.max(part.Transparency, 0.5)
+			part.Size = Vector3.new(part.Size.X, part.Size.Y * 0.8, part.Size.Z)
+		end
+	end
+
+	-- Vertical fade gradient + darken/desaturate
+	local highestY, lowestY = -math.huge, math.huge
+	for _, part in ipairs(reflectionClone:GetDescendants()) do
+		if part:IsA("BasePart") then
+			if part.Position.Y > highestY then highestY = part.Position.Y end
+			if part.Position.Y < lowestY then lowestY = part.Position.Y end
+		end
+	end
+	local heightRange = math.max(highestY - lowestY, 0.1)
+
+	for _, part in ipairs(reflectionClone:GetDescendants()) do
+		if part:IsA("BasePart") then
+			-- Gradient: 0.35 at feet (near water), 0.75 at head (fades away)
+			local t = math.clamp((part.Position.Y - lowestY) / heightRange, 0, 1)
+			local gradientTransparency = 0.35 + t * 0.4
+			part.Transparency = math.max(part.Transparency, gradientTransparency)
 			part.CanCollide = false
 			part.CastShadow = false
+			-- Darken ~30% + desaturate toward grey
+			local c = part.Color
+			local grey = (c.R + c.G + c.B) / 3
+			local desatAmt = 0.3 -- 30% toward grey
+			local darkAmt = 0.7 -- multiply brightness by 70%
+			part.Color = Color3.new(
+				(c.R * (1 - desatAmt) + grey * desatAmt) * darkAmt,
+				(c.G * (1 - desatAmt) + grey * desatAmt) * darkAmt,
+				(c.B * (1 - desatAmt) + grey * desatAmt) * darkAmt
+			)
+			-- Remove surface textures for softer look
+			for _, child in ipairs(part:GetChildren()) do
+				if child:IsA("SurfaceAppearance") or child:IsA("Texture") or child:IsA("Decal") then
+					child:Destroy()
+				end
+			end
+			part.Material = Enum.Material.SmoothPlastic
 		end
 	end
 
@@ -801,11 +839,34 @@ local function SpawnInventoryDisplayModel(unitId)
 		reflectionRoot.Anchored = true
 	end
 
-	-- Position reflection upside-down at the feet (flipped on Z axis for mirror effect)
-	local modelHeight = 3.6 -- Approximate height of model
-	local reflectionFinalPos = displayPosition - Vector3.new(0, modelHeight, 0)
-	local reflectionStartPos = reflectionFinalPos - Vector3.new(0, 0.5, 0) -- Start lower (appears higher when upside down)
-	reflectionClone:PivotTo(CFrame.new(reflectionStartPos) * CFrame.Angles(0, math.rad(inventoryModelRotation), math.rad(180)))
+	-- Calculate exact distance from root to feet for precise reflection alignment
+	local feetToRoot = 0
+	if rootPart then
+		local rootY = rootPart.Position.Y
+		local lowestY = rootY
+		for _, part in ipairs(modelClone:GetDescendants()) do
+			if part:IsA("BasePart") then
+				local bottomY = part.Position.Y - part.Size.Y / 2
+				if bottomY < lowestY then
+					lowestY = bottomY
+				end
+			end
+		end
+		feetToRoot = rootY - lowestY
+	end
+	inventoryFeetToRoot = feetToRoot
+
+	-- Build a Y-negated CFrame for true mirror reflection (no facing direction change)
+	local MIRROR_Y = CFrame.new() * CFrame.fromMatrix(Vector3.new(), Vector3.xAxis, -Vector3.yAxis, Vector3.zAxis)
+
+	local function makeReflectionCFrame(pos)
+		return CFrame.new(pos) * CFrame.Angles(0, math.rad(inventoryModelRotation), 0) * MIRROR_Y
+	end
+
+	-- Position reflection so its feet meet the main model's feet
+	local reflectionFinalPos = displayPosition - Vector3.new(0, 2 * feetToRoot, 0)
+	local reflectionStartPos = reflectionFinalPos - Vector3.new(0, 0.5, 0)
+	reflectionClone:PivotTo(makeReflectionCFrame(reflectionStartPos))
 
 	reflectionClone.Parent = workspace
 	inventoryMirrorModel = reflectionClone
@@ -813,10 +874,48 @@ local function SpawnInventoryDisplayModel(unitId)
 	-- Animate reflection drop (rises toward water surface)
 	if reflectionRoot then
 		local reflectionDropTween = TweenService:Create(reflectionRoot, TweenInfo.new(0.2, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-			CFrame = CFrame.new(reflectionFinalPos) * CFrame.Angles(0, math.rad(inventoryModelRotation), math.rad(180))
+			CFrame = makeReflectionCFrame(reflectionFinalPos)
 		})
 		reflectionDropTween:Play()
 	end
+
+	-- Subtle water ripple: gently wobble reflection position using layered sine waves
+	if reflectionRippleConnection then
+		reflectionRippleConnection:Disconnect()
+		reflectionRippleConnection = nil
+	end
+	local rippleStart = tick()
+	reflectionRippleConnection = RunService.RenderStepped:Connect(function()
+		if not inventoryMirrorModel or not inventoryMirrorModel.Parent then
+			if reflectionRippleConnection then
+				reflectionRippleConnection:Disconnect()
+				reflectionRippleConnection = nil
+			end
+			return
+		end
+		local t = tick() - rippleStart
+
+		-- Subtle vertical wobble only: ±0.03 studs — reads as surface distortion
+		local offsetY = math.sin(t * 1.1) * 0.025 + math.sin(t * 2.3) * 0.01
+		local rippleOffset = Vector3.new(0, offsetY, 0)
+
+		local basePos = displayPosition - Vector3.new(0, 2 * inventoryFeetToRoot, 0)
+		local MIRROR_Y = CFrame.fromMatrix(Vector3.new(), Vector3.xAxis, -Vector3.yAxis, Vector3.zAxis)
+		inventoryMirrorModel:PivotTo(CFrame.new(basePos + rippleOffset) * CFrame.Angles(0, math.rad(inventoryModelRotation), 0) * MIRROR_Y)
+	end)
+
+	-- DepthOfField: character sharp, reflection naturally softer
+	if inventoryDepthOfField then
+		inventoryDepthOfField:Destroy()
+		inventoryDepthOfField = nil
+	end
+	local dof = Instance.new("DepthOfFieldEffect")
+	dof.FocusDistance = 2
+	dof.InFocusRadius = 3.17
+	dof.FarIntensity = 0.12
+	dof.NearIntensity = 0
+	dof.Parent = game:GetService("Lighting")
+	inventoryDepthOfField = dof
 
 	print("LobbyController: Simple reflection clone created")
 
@@ -859,65 +958,11 @@ local function SpawnInventoryDisplayModel(unitId)
 		local reflectionAnimTrack = refAnimator:LoadAnimation(reflectionAnimation)
 		reflectionAnimTrack.Looped = true
 		reflectionAnimTrack:Play()
+		-- Animation desync: offset reflection animation slightly so it doesn't mirror frame-for-frame
+		reflectionAnimTrack.TimePosition = reflectionAnimTrack.Length * 0.08
+		reflectionAnimTrack:AdjustSpeed(0.97) -- Slightly slower so it drifts further over time
 		reflectionCurrentAnimTrack = reflectionAnimTrack
 	end
-
-	-- Set up mouse drag rotation
-	local UserInputService = game:GetService("UserInputService")
-	local isDragging = false
-	local lastMouseX = 0
-
-	-- Disconnect any existing rotation connection
-	if inventoryRotationConnection then
-		inventoryRotationConnection:Disconnect()
-		inventoryRotationConnection = nil
-	end
-
-	local function updateModelRotation()
-		if inventoryDisplayModel then
-			local displayPosition = Vector3.new(0.664, 598.971, 1195.967)
-			inventoryDisplayModel:PivotTo(CFrame.new(displayPosition) * CFrame.Angles(0, math.rad(inventoryModelRotation), 0))
-
-			-- Also rotate the reflection clone (upside down on Z axis)
-			if inventoryMirrorModel then
-				local modelHeight = 3.6
-				inventoryMirrorModel:PivotTo(CFrame.new(displayPosition - Vector3.new(0, modelHeight, 0)) * CFrame.Angles(0, math.rad(inventoryModelRotation), math.rad(180)))
-			end
-		end
-	end
-
-	-- Track mouse button state
-	local mouseDownConn = UserInputService.InputBegan:Connect(function(input, gameProcessed)
-		if gameProcessed then return end
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			isDragging = true
-			lastMouseX = input.Position.X
-		end
-	end)
-
-	local mouseUpConn = UserInputService.InputEnded:Connect(function(input)
-		if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
-			isDragging = false
-		end
-	end)
-
-	local mouseMoveConn = UserInputService.InputChanged:Connect(function(input)
-		if isDragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
-			local deltaX = input.Position.X - lastMouseX
-			inventoryModelRotation = inventoryModelRotation - deltaX * 0.5 -- Adjust sensitivity here
-			lastMouseX = input.Position.X
-			updateModelRotation()
-		end
-	end)
-
-	-- Store connections for cleanup
-	inventoryRotationConnection = {
-		Disconnect = function()
-			mouseDownConn:Disconnect()
-			mouseUpConn:Disconnect()
-			mouseMoveConn:Disconnect()
-		end
-	}
 
 	print("LobbyController: Spawned inventory display model for", tower.Name)
 end
@@ -2338,10 +2383,15 @@ function LobbyController.CloseInventoryMode()
 	local Lighting = game:GetService("Lighting")
 	local camera = workspace.CurrentCamera
 
-	-- Clean up rotation connection
-	if inventoryRotationConnection then
-		inventoryRotationConnection:Disconnect()
-		inventoryRotationConnection = nil
+	-- Clean up reflection ripple connection
+	if reflectionRippleConnection then
+		reflectionRippleConnection:Disconnect()
+		reflectionRippleConnection = nil
+	end
+	-- Clean up DepthOfField
+	if inventoryDepthOfField then
+		inventoryDepthOfField:Destroy()
+		inventoryDepthOfField = nil
 	end
 	inventoryModelRotation = 160 -- Reset rotation to default angle
 
