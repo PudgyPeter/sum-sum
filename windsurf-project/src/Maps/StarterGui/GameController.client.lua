@@ -1518,6 +1518,134 @@ loadoutFrame.Visible = true
 
 UpdateTowerCounts()
 
+-- Function to add a tower slot dynamically when loadout changes
+local function AddTowerSlotFromLoadout(slotValue)
+	if not slotValue:IsA("StringValue") then return end
+	
+	local slotNumber = tonumber(slotValue.Name:match("Slot_(%d+)"))
+	if not slotNumber or slotNumber < 1 or slotNumber > 6 then return end
+	
+	local towerName = slotValue.Value
+	if not towerName or towerName == "" then return end
+	
+	-- Remove existing slot at this position (empty or filled)
+	local existingSlot = loadoutFrame:FindFirstChild("Slot" .. slotNumber)
+	if existingSlot then existingSlot:Destroy() end
+	local existingEmpty = loadoutFrame:FindFirstChild("EmptySlot" .. slotNumber)
+	if existingEmpty then existingEmpty:Destroy() end
+	
+	-- Find tower model
+	local towerModel = towers:FindFirstChild(towerName)
+	if not towerModel then
+		warn("[GameController] Tower model not found:", towerName)
+		return
+	end
+	
+	local config = towerModel:FindFirstChild("Config")
+	if not config then return end
+	
+	-- Update playerLoadout table
+	playerLoadout[slotNumber] = towerName
+	
+	-- Create slot from template
+	local slot = template:Clone()
+	slot.Name = "Slot" .. slotNumber
+	slot.Visible = true
+	slot.LayoutOrder = slotNumber
+	
+	local costLabel = slot:FindFirstChild("Cost")
+	if costLabel then
+		costLabel.Text = "$" .. config.Price.Value
+	end
+	
+	local priceLabel = slot:FindFirstChild("Price")
+	if priceLabel then
+		priceLabel.Text = "$" .. config.Price.Value
+	end
+	
+	-- Setup viewport
+	local viewportFrame = slot:FindFirstChild("ViewportFrame")
+	if viewportFrame then
+		local worldModel = viewportFrame:FindFirstChild("WorldModel")
+		if not worldModel then
+			worldModel = Instance.new("WorldModel")
+			worldModel.Parent = viewportFrame
+		else
+			worldModel:ClearAllChildren()
+		end
+		
+		towerModel.Archivable = true
+		for _, obj in ipairs(towerModel:GetDescendants()) do
+			obj.Archivable = true
+		end
+		
+		local modelClone = towerModel:Clone()
+		for _, obj in ipairs(modelClone:GetDescendants()) do
+			if obj:IsA("Script") or obj:IsA("LocalScript") then
+				obj:Destroy()
+			end
+		end
+		modelClone.Parent = worldModel
+		
+		local camera = Instance.new("Camera")
+		camera.Parent = viewportFrame
+		viewportFrame.CurrentCamera = camera
+		
+		if modelClone.PrimaryPart then
+			local position = modelClone.PrimaryPart.Position
+			modelClone:SetPrimaryPartCFrame(CFrame.new(position) * CFrame.Angles(0, math.rad(180), 0))
+			camera.CFrame = CFrame.new(position + Vector3.new(0, 1, 2), position + Vector3.new(0, 1, 0))
+		end
+		
+		local humanoid = modelClone:FindFirstChild("Humanoid")
+		if humanoid then
+			local animator = humanoid:FindFirstChildOfClass("Animator")
+			if not animator then
+				animator = Instance.new("Animator")
+				animator.Parent = humanoid
+			end
+			local animation = Instance.new("Animation")
+			animation.AnimationId = "rbxassetid://180435571"
+			local animTrack = animator:LoadAnimation(animation)
+			animTrack.Looped = true
+			animTrack:Play()
+		end
+	end
+	
+	-- Get max placement
+	local maxCount = 10
+	local maxPlacements = config:FindFirstChild("MaxPlacements")
+	if maxPlacements and maxPlacements:IsA("NumberValue") then
+		maxCount = maxPlacements.Value
+	end
+	
+	slot:SetAttribute("TowerName", towerModel.Name)
+	slot:SetAttribute("MaxCount", maxCount)
+	towerSlots[slotNumber] = slot
+	
+	slot.Activated:Connect(function()
+		local count = placedTowerCounts[towerModel.Name] or 0
+		if count >= maxCount then
+			ShowMaxLimitWarning()
+		else
+			local allowedToSpawn = requestTowerFunction:InvokeServer(towerModel.Name)
+			if allowedToSpawn then
+				AddPlaceholderTower(towerModel.Name)
+			end
+		end
+	end)
+	
+	slot.Parent = loadoutFrame
+	print("[GameController] Added tower slot:", towerName, "to slot", slotNumber)
+	UpdateTowerCounts()
+end
+
+-- Listen for loadout changes (e.g., from ModMenu)
+local loadoutFolder = playerData and playerData:FindFirstChild("Loadout")
+if loadoutFolder then
+	loadoutFolder.ChildAdded:Connect(AddTowerSlotFromLoadout)
+end
+
 local characterClone
 local worldModel
 

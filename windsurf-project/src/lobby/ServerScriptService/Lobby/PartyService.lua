@@ -31,7 +31,7 @@ local parties = {}
 local playerToParty = {}
 -- playerDebounce[Player] = tick() (prevents immediate re-entry after leaving)
 local playerDebounce = {}
-local DEBOUNCE_TIME = 3 -- Seconds before player can re-enter after leaving
+local DEBOUNCE_TIME = 1.5 -- Seconds before player can re-enter after leaving
 
 -- Remote Events/Functions (pre-created in Studio)
 local functions = ReplicatedStorage:WaitForChild("Functions")

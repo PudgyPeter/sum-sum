@@ -310,6 +310,46 @@ modMenuFunction.OnServerInvoke = function(player, action, data)
 		end
 		
 		return towers
+		
+	elseif action == "AddUnitToLoadout" then
+		local towerName = data.TowerName
+		local slot = data.Slot or 1
+		
+		-- Validate tower exists in ReplicatedStorage
+		local towerModel = ReplicatedStorage.Towers:FindFirstChild(towerName)
+		if not towerModel then
+			return {Success = false, Error = "Tower model not found: " .. tostring(towerName)}
+		end
+		
+		-- Get or create player's loadout folder
+		local playerData = player:FindFirstChild("PlayerData")
+		if not playerData then
+			playerData = Instance.new("Folder")
+			playerData.Name = "PlayerData"
+			playerData.Parent = player
+		end
+		
+		local loadoutFolder = playerData:FindFirstChild("Loadout")
+		if not loadoutFolder then
+			loadoutFolder = Instance.new("Folder")
+			loadoutFolder.Name = "Loadout"
+			loadoutFolder.Parent = playerData
+		end
+		
+		-- Remove existing slot if it exists
+		local existingSlot = loadoutFolder:FindFirstChild("Slot_" .. slot)
+		if existingSlot then
+			existingSlot:Destroy()
+		end
+		
+		-- Add tower to loadout slot
+		local slotValue = Instance.new("StringValue")
+		slotValue.Name = "Slot_" .. slot
+		slotValue.Value = towerName
+		slotValue.Parent = loadoutFolder
+		
+		print("[ModMenu] Added", towerName, "to slot", slot, "for", player.Name)
+		return {Success = true, TowerName = towerName, Slot = slot}
 	end
 	
 	return {Success = false, Error = "Unknown action"}

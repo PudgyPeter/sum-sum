@@ -992,8 +992,9 @@ local function easeInOut(t)
 end
 
 -- Smooth direct camera tween (no arc, straight CFrame lerp)
-local function TweenCameraSmooth(camera, targetCFrame, duration)
+local function TweenCameraSmooth(camera, targetCFrame, duration, onComplete)
 	CancelCameraArc()
+
 	local startCFrame = camera.CFrame
 	local elapsed = 0
 	local RunService = game:GetService("RunService")
@@ -1005,13 +1006,14 @@ local function TweenCameraSmooth(camera, targetCFrame, duration)
 		if t >= 1 then
 			camera.CFrame = targetCFrame
 			CancelCameraArc()
+			if onComplete then onComplete() end
 		end
 	end)
 end
 
 -- Animate camera along a Bezier arc around the character model
 -- arcRadius controls how far outward the arc swings from the model
-local function TweenCameraArc(camera, targetCFrame, duration, arcRadius)
+local function TweenCameraArc(camera, targetCFrame, duration, arcRadius, onComplete)
 	CancelCameraArc()
 
 	local startCFrame = camera.CFrame
@@ -1049,6 +1051,7 @@ local function TweenCameraArc(camera, targetCFrame, duration, arcRadius)
 		if t >= 1 then
 			camera.CFrame = targetCFrame
 			CancelCameraArc()
+			if onComplete then onComplete() end
 		end
 	end)
 end
@@ -1056,7 +1059,7 @@ end
 -- Orbital arc: camera sweeps around the model in a smooth circular path.
 -- Converts positions to polar coords (angle, radius, height) and interpolates.
 -- Always looks at the character. No Bezier, no clipping, one smooth motion.
-local function TweenCameraOrbit(camera, targetCFrame, duration)
+local function TweenCameraOrbit(camera, targetCFrame, duration, onComplete)
 	CancelCameraArc()
 
 	local startCFrame = camera.CFrame
@@ -1111,6 +1114,7 @@ local function TweenCameraOrbit(camera, targetCFrame, duration)
 		if t >= 1 then
 			camera.CFrame = targetCFrame
 			CancelCameraArc()
+			if onComplete then onComplete() end
 		end
 	end)
 end
@@ -1124,19 +1128,122 @@ local function SwitchInventoryTab(tabName)
 	local camera = workspace.CurrentCamera
 	local targetCFrame = TAB_CAMERAS[tabName]
 
+	-- Hide/show RelicFrame based on tab
+	local inventoryUI2 = gui:FindFirstChild("InventoryUI2")
+	local relicFrame = inventoryUI2 and inventoryUI2:FindFirstChild("RelicFrame")
+	if relicFrame and previousTab == "Relics" and tabName ~= "Relics" then
+		relicFrame.Visible = false
+	end
+
+	-- Show RelicFrame callback (called when camera finishes moving to Relics)
+	local function onCameraArrived()
+		if relicFrame and currentInventoryTab == "Relics" then
+			relicFrame.Visible = true
+
+			-- Hide background + sheen initially (store originals for all descendants)
+			local bg = relicFrame:FindFirstChild("Background")
+			local sheen = relicFrame:FindFirstChild("Sheen")
+			local bgSheenFadeInfo = {} -- {el, orig, prop}
+			for _, el in ipairs({bg, sheen}) do
+				if el then
+					local origBgT = el.BackgroundTransparency
+					el.BackgroundTransparency = 1
+					table.insert(bgSheenFadeInfo, {el = el, orig = origBgT, prop = "BackgroundTransparency"})
+					if (el:IsA("ImageLabel") or el:IsA("ImageButton")) then
+						table.insert(bgSheenFadeInfo, {el = el, orig = el.ImageTransparency, prop = "ImageTransparency"})
+						el.ImageTransparency = 1
+					end
+					for _, desc in ipairs(el:GetDescendants()) do
+						if desc:IsA("ImageLabel") or desc:IsA("ImageButton") then
+							table.insert(bgSheenFadeInfo, {el = desc, orig = desc.ImageTransparency, prop = "ImageTransparency"})
+							desc.ImageTransparency = 1
+						elseif desc:IsA("TextLabel") or desc:IsA("TextButton") then
+							table.insert(bgSheenFadeInfo, {el = desc, orig = desc.TextTransparency, prop = "TextTransparency"})
+							desc.TextTransparency = 1
+						end
+						if desc:IsA("UIStroke") then
+							table.insert(bgSheenFadeInfo, {el = desc, orig = desc.Transparency, prop = "Transparency"})
+							desc.Transparency = 1
+						end
+					end
+				end
+			end
+
+			-- Collect buttons in exact order: Weapon, Armor, Accessories, Artifact
+			local buttonOrder = {"WeaponFrame", "ArmorFrame", "AccessoriesFrame", "ArtifactFrame"}
+			local buttons = {}
+			for _, name in ipairs(buttonOrder) do
+				local btn = relicFrame:FindFirstChild(name)
+				if btn then table.insert(buttons, btn) end
+			end
+
+			-- Phase 1: Buttons slide in from right + fade in, top to bottom
+			local lastButtonDelay = 0
+			for i, btn in ipairs(buttons) do
+				local origPos = btn.Position
+				local origBgT = btn.BackgroundTransparency
+				-- Start offset + fully invisible
+				btn.Position = origPos + UDim2.new(0.08, 0, 0, 0)
+				btn.BackgroundTransparency = 1
+				local props = { Position = origPos, BackgroundTransparency = origBgT }
+				-- Fade all image children inside the button too
+				local imageChildren = {}
+				if btn:IsA("ImageLabel") or btn:IsA("ImageButton") then
+					table.insert(imageChildren, {el = btn, orig = btn.ImageTransparency})
+					btn.ImageTransparency = 1
+				end
+				for _, desc in ipairs(btn:GetDescendants()) do
+					if desc:IsA("ImageLabel") or desc:IsA("ImageButton") then
+						table.insert(imageChildren, {el = desc, orig = desc.ImageTransparency})
+						desc.ImageTransparency = 1
+					elseif desc:IsA("TextLabel") or desc:IsA("TextButton") then
+						table.insert(imageChildren, {el = desc, orig = desc.TextTransparency, prop = "TextTransparency"})
+						desc.TextTransparency = 1
+					end
+					if desc:IsA("UIStroke") then
+						table.insert(imageChildren, {el = desc, orig = desc.Transparency, prop = "Transparency"})
+						desc.Transparency = 1
+					end
+				end
+				local stagger = (i - 1) * 0.1
+				lastButtonDelay = stagger + 0.35
+				task.delay(stagger, function()
+					TweenService:Create(btn, TweenInfo.new(0.35, Enum.EasingStyle.Back, Enum.EasingDirection.Out), props):Play()
+					-- Fade in all image/text children
+					for _, info in ipairs(imageChildren) do
+						local fadeProp = info.prop or "ImageTransparency"
+						TweenService:Create(info.el, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+							[fadeProp] = info.orig
+						}):Play()
+					end
+				end)
+			end
+
+			-- Phase 2: Background + Sheen (and all their descendants) fade in after buttons finish
+			task.delay(lastButtonDelay, function()
+				for _, info in ipairs(bgSheenFadeInfo) do
+					TweenService:Create(info.el, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+						[info.prop] = info.orig
+					}):Play()
+				end
+			end)
+		end
+	end
+
 	if targetCFrame then
 		local fromSide = TAB_SIDE[previousTab] or 0
 		local toSide = TAB_SIDE[tabName] or 0
+		local callback = (tabName == "Relics") and onCameraArrived or nil
 
 		if fromSide ~= 0 and toSide ~= 0 and fromSide ~= toSide then
 			-- Opposite sides (Traits↔Relics): smooth orbital sweep around the character
-			TweenCameraOrbit(camera, targetCFrame, 0.8)
+			TweenCameraOrbit(camera, targetCFrame, 0.8, callback)
 		elseif tabName == "Relics" or previousTab == "Relics" then
 			-- Overview↔Relics: wide arc
-			TweenCameraArc(camera, targetCFrame, 0.6, 4)
+			TweenCameraArc(camera, targetCFrame, 0.6, 4, callback)
 		else
 			-- Overview↔Traits (and others): smooth direct
-			TweenCameraSmooth(camera, targetCFrame, 0.5)
+			TweenCameraSmooth(camera, targetCFrame, 0.5, callback)
 		end
 	end
 
@@ -2305,6 +2412,9 @@ function LobbyController.OpenInventoryMode()
 			if cancelButton then cancelButton.Visible = false end
 			if lockUnitBtn then lockUnitBtn.Visible = true end
 			if sellUnitBtn then sellUnitBtn.Visible = true end
+			-- Hide RelicFrame by default (shown only when Relics tab camera arrives)
+			local relicFrame = inventoryUI2:FindFirstChild("RelicFrame")
+			if relicFrame then relicFrame.Visible = false end
 		end
 
 		-- Remove old dynamically-created close button if it exists
@@ -3333,6 +3443,171 @@ end
 
 -- Initialize
 function LobbyController.Initialize()
+	-- ═══════════════════════════════════════════════════════
+	-- LOADING SCREEN: black overlay with progress bar
+	-- ═══════════════════════════════════════════════════════
+	local loadingScreenGui = Instance.new("ScreenGui")
+	loadingScreenGui.Name = "LoadingScreen"
+	loadingScreenGui.DisplayOrder = 10
+	loadingScreenGui.IgnoreGuiInset = true
+	loadingScreenGui.Parent = player:WaitForChild("PlayerGui")
+
+	local overlay = Instance.new("Frame")
+	overlay.Name = "Overlay"
+	overlay.Size = UDim2.new(1, 0, 1, 0)
+	overlay.BackgroundColor3 = Color3.new(0, 0, 0)
+	overlay.BackgroundTransparency = 0
+	overlay.BorderSizePixel = 0
+	overlay.Parent = loadingScreenGui
+
+	local loadingLabel = Instance.new("TextLabel")
+	loadingLabel.Name = "LoadingLabel"
+	loadingLabel.Size = UDim2.new(0.4, 0, 0.06, 0)
+	loadingLabel.Position = UDim2.new(0.3, 0, 0.42, 0)
+	loadingLabel.BackgroundTransparency = 1
+	loadingLabel.Text = "Loading..."
+	loadingLabel.TextColor3 = Color3.new(1, 1, 1)
+	loadingLabel.TextScaled = true
+	loadingLabel.Font = Enum.Font.GothamBold
+	loadingLabel.Parent = overlay
+
+	local barBg = Instance.new("Frame")
+	barBg.Name = "BarBackground"
+	barBg.Size = UDim2.new(0.4, 0, 0.02, 0)
+	barBg.Position = UDim2.new(0.3, 0, 0.49, 0)
+	barBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
+	barBg.BorderSizePixel = 0
+	barBg.Parent = overlay
+
+	local barCorner = Instance.new("UICorner")
+	barCorner.CornerRadius = UDim.new(0.5, 0)
+	barCorner.Parent = barBg
+
+	local barFill = Instance.new("Frame")
+	barFill.Name = "BarFill"
+	barFill.Size = UDim2.new(0, 0, 1, 0)
+	barFill.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
+	barFill.BorderSizePixel = 0
+	barFill.Parent = barBg
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(0.5, 0)
+	fillCorner.Parent = barFill
+
+	local progressLabel = Instance.new("TextLabel")
+	progressLabel.Name = "ProgressLabel"
+	progressLabel.Size = UDim2.new(0.4, 0, 0.03, 0)
+	progressLabel.Position = UDim2.new(0.3, 0, 0.52, 0)
+	progressLabel.BackgroundTransparency = 1
+	progressLabel.Text = "0 / 0"
+	progressLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
+	progressLabel.TextScaled = true
+	progressLabel.Font = Enum.Font.Gotham
+	progressLabel.Parent = overlay
+
+	local skipLabel = Instance.new("TextLabel")
+	skipLabel.Name = "SkipLabel"
+	skipLabel.Size = UDim2.new(0.3, 0, 0.03, 0)
+	skipLabel.Position = UDim2.new(0.35, 0, 0.58, 0)
+	skipLabel.BackgroundTransparency = 1
+	skipLabel.Text = "Click anywhere to skip"
+	skipLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
+	skipLabel.TextScaled = true
+	skipLabel.Font = Enum.Font.Gotham
+	skipLabel.Parent = overlay
+
+	-- Skip button (invisible, covers entire screen)
+	local skipButton = Instance.new("TextButton")
+	skipButton.Name = "SkipButton"
+	skipButton.Size = UDim2.new(1, 0, 1, 0)
+	skipButton.BackgroundTransparency = 1
+	skipButton.Text = ""
+	skipButton.Parent = overlay
+
+	local loadingSkipped = false
+	local loadingDone = false
+
+	local function dismissLoadingScreen()
+		if loadingDone then return end
+		loadingDone = true
+		TweenService:Create(overlay, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+			BackgroundTransparency = 1
+		}):Play()
+		TweenService:Create(loadingLabel, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+		TweenService:Create(progressLabel, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+		TweenService:Create(skipLabel, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
+		TweenService:Create(barBg, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+		TweenService:Create(barFill, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+		task.delay(0.6, function()
+			loadingScreenGui:Destroy()
+		end)
+	end
+
+	skipButton.Activated:Connect(function()
+		loadingSkipped = true
+		dismissLoadingScreen()
+	end)
+
+	-- Collect ALL assets to preload
+	task.spawn(function()
+		local assetsToPreload = {}
+
+		-- All images in the entire LobbyGui
+		for _, desc in ipairs(gui:GetDescendants()) do
+			if (desc:IsA("ImageLabel") or desc:IsA("ImageButton")) and desc.Image ~= "" then
+				table.insert(assetsToPreload, desc)
+			end
+		end
+
+		-- All tab animations (idles + directional transitions)
+		local preloadedIds = {}
+		for _, id in pairs(TAB_IDLE_ANIMS) do
+			if id and not preloadedIds[id] then
+				preloadedIds[id] = true
+				local anim = Instance.new("Animation")
+				anim.AnimationId = id
+				table.insert(assetsToPreload, anim)
+			end
+		end
+		for _, toTable in pairs(TAB_TRANSITIONS) do
+			for _, id in pairs(toTable) do
+				if id and not preloadedIds[id] then
+					preloadedIds[id] = true
+					local anim = Instance.new("Animation")
+					anim.AnimationId = id
+					table.insert(assetsToPreload, anim)
+				end
+			end
+		end
+
+		-- All tower models
+		local towersFolder = ReplicatedStorage:FindFirstChild("Towers")
+		if towersFolder then
+			for _, model in ipairs(towersFolder:GetChildren()) do
+				table.insert(assetsToPreload, model)
+			end
+		end
+
+		local totalAssets = #assetsToPreload
+		local loadedCount = 0
+		progressLabel.Text = "0 / " .. totalAssets
+
+		ContentProvider:PreloadAsync(assetsToPreload, function(assetId, status)
+			loadedCount = loadedCount + 1
+			if not loadingDone then
+				local pct = loadedCount / math.max(totalAssets, 1)
+				barFill.Size = UDim2.new(pct, 0, 1, 0)
+				progressLabel.Text = loadedCount .. " / " .. totalAssets
+			end
+		end)
+
+		print("LobbyController: All assets preloaded (" .. totalAssets .. " items)")
+		if not loadingSkipped then
+			task.wait(0.3) -- Brief pause so user sees 100%
+			dismissLoadingScreen()
+		end
+	end)
+
 	-- Wait for player data to load
 	local playerData = player:WaitForChild("PlayerData")
 
@@ -3773,6 +4048,71 @@ function LobbyController.Initialize()
 			setupSideButton("Relics")
 			setupSideButton("Evolution")
 		end
+
+		-- RelicFrame buttons: hover shrink + click shrink
+		local relicFrame = inventoryUI2:FindFirstChild("RelicFrame")
+		if relicFrame then
+			local relicButtonNames = {"WeaponFrame", "ArmorFrame", "AccessoriesFrame", "ArtifactFrame"}
+			for _, btnName in ipairs(relicButtonNames) do
+				local btn = relicFrame:FindFirstChild(btnName)
+				if btn then
+					local originalSize = btn.Size
+					local hoverSize = UDim2.new(
+						originalSize.X.Scale * 0.95, originalSize.X.Offset * 0.95,
+						originalSize.Y.Scale * 0.95, originalSize.Y.Offset * 0.95
+					)
+					local clickSize = UDim2.new(
+						originalSize.X.Scale * 0.9, originalSize.X.Offset * 0.9,
+						originalSize.Y.Scale * 0.9, originalSize.Y.Offset * 0.9
+					)
+					local isHovering = false
+					local isPressed = false
+					local activeTween = nil
+
+					local function playTween(targetSize, duration, style, direction)
+						if activeTween then activeTween:Cancel() end
+						activeTween = TweenService:Create(btn, TweenInfo.new(duration, style or Enum.EasingStyle.Quad, direction or Enum.EasingDirection.Out), {
+							Size = targetSize
+						})
+						activeTween:Play()
+					end
+
+					btn.MouseEnter:Connect(function()
+						isHovering = true
+						if not isPressed then
+							playTween(hoverSize, 0.5, Enum.EasingStyle.Quint, Enum.EasingDirection.Out)
+						end
+					end)
+
+					btn.MouseLeave:Connect(function()
+						isHovering = false
+						if not isPressed then
+							playTween(originalSize, 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+						end
+					end)
+
+					btn.InputBegan:Connect(function(input)
+						if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+							isPressed = true
+							playTween(clickSize, 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.Out)
+						end
+					end)
+
+					btn.InputEnded:Connect(function(input)
+						if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+							isPressed = false
+							if isHovering then
+								playTween(hoverSize, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+							else
+								playTween(originalSize, 0.3, Enum.EasingStyle.Back, Enum.EasingDirection.Out)
+							end
+						end
+					end)
+
+					print("LobbyController: Connected RelicFrame button", btnName)
+				end
+			end
+		end
 	else
 		warn("LobbyController: InventoryUI2 not found")
 	end
@@ -3833,44 +4173,6 @@ function LobbyController.Initialize()
 	end
 
 	print("Lobby controller initialized")
-
-	-- Preload inventory mode assets in background
-	task.spawn(function()
-		print("LobbyController: Preloading inventory assets...")
-		local assetsToPreload = {}
-
-		-- Preload all tab animations (idles + directional transitions)
-		local preloadedIds = {}
-		for _, id in pairs(TAB_IDLE_ANIMS) do
-			if id and not preloadedIds[id] then
-				preloadedIds[id] = true
-				local anim = Instance.new("Animation")
-				anim.AnimationId = id
-				table.insert(assetsToPreload, anim)
-			end
-		end
-		for _, toTable in pairs(TAB_TRANSITIONS) do
-			for _, id in pairs(toTable) do
-				if id and not preloadedIds[id] then
-					preloadedIds[id] = true
-					local anim = Instance.new("Animation")
-					anim.AnimationId = id
-					table.insert(assetsToPreload, anim)
-				end
-			end
-		end
-
-		-- Preload all tower models
-		local towersFolder = ReplicatedStorage:FindFirstChild("Towers")
-		if towersFolder then
-			for _, model in ipairs(towersFolder:GetChildren()) do
-				table.insert(assetsToPreload, model)
-			end
-		end
-
-		ContentProvider:PreloadAsync(assetsToPreload)
-		print("LobbyController: Inventory assets preloaded")
-	end)
 end
 
 -- Auto-initialize

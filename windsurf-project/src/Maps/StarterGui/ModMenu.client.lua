@@ -533,6 +533,71 @@ for _, tagName in ipairs(allTags) do
 	tagOrder = tagOrder + 1
 end
 
+-- ADD UNIT TO TEAM SECTION
+CreateSection("➕ Add Unit to Team", 150)
+
+-- Get all available tower models from ReplicatedStorage
+local allTowers = {"Select Tower..."}
+local towersFolder = ReplicatedStorage:FindFirstChild("Towers")
+if towersFolder then
+	for _, tower in ipairs(towersFolder:GetChildren()) do
+		if tower:IsA("Model") then
+			table.insert(allTowers, tower.Name)
+		end
+	end
+	table.sort(allTowers, function(a, b)
+		if a == "Select Tower..." then return true end
+		if b == "Select Tower..." then return false end
+		return a < b
+	end)
+end
+
+local selectedTowerToAdd = nil
+
+CreateDropdown("Tower", allTowers, 151, function(towerName)
+	selectedTowerToAdd = towerName ~= "Select Tower..." and towerName or nil
+end)
+
+-- Slot selection dropdown
+local slotOptions = {"Slot 1", "Slot 2", "Slot 3", "Slot 4", "Slot 5", "Slot 6"}
+local selectedSlot = 1
+
+CreateDropdown("Loadout Slot", slotOptions, 152, function(slot)
+	selectedSlot = tonumber(slot:match("%d+")) or 1
+end)
+
+-- Add Unit button
+local addUnitBtn = Instance.new("TextButton")
+addUnitBtn.Name = "AddUnitButton"
+addUnitBtn.Size = UDim2.new(1, 0, 0, 35)
+addUnitBtn.BackgroundColor3 = Color3.fromRGB(80, 120, 200)
+addUnitBtn.Text = "➕ Add Unit to Loadout"
+addUnitBtn.TextColor3 = Color3.fromRGB(255, 255, 255)
+addUnitBtn.TextSize = 14
+addUnitBtn.Font = Enum.Font.GothamBold
+addUnitBtn.LayoutOrder = 153
+addUnitBtn.Parent = scrollFrame
+
+local addUnitCorner = Instance.new("UICorner")
+addUnitCorner.CornerRadius = UDim.new(0, 8)
+addUnitCorner.Parent = addUnitBtn
+
+addUnitBtn.MouseButton1Click:Connect(function()
+	if selectedTowerToAdd then
+		local result = modMenuFunction:InvokeServer("AddUnitToLoadout", {
+			TowerName = selectedTowerToAdd,
+			Slot = selectedSlot
+		})
+		if result and result.Success then
+			print("[ModMenu] Added", selectedTowerToAdd, "to slot", selectedSlot)
+		else
+			warn("[ModMenu] Failed to add unit:", result and result.Error or "Unknown error")
+		end
+	else
+		warn("[ModMenu] Please select a tower first")
+	end
+end)
+
 -- CHEATS SECTION
 CreateSection("💀 Cheats (Testing Only)", 200)
 
