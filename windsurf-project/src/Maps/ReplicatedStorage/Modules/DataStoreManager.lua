@@ -39,6 +39,7 @@ local playerDataStore = DataStoreService:GetDataStore(PlayerDataStoreName)
 
 -- Cache for player data
 local dataCache = {}
+local savedPlayers = {}
 
 -- Queue for saving data to prevent throttling
 local saveQueue = {}
@@ -61,9 +62,7 @@ local function processSaveQueue()
 		playerDataStore:SetAsync(userId, data)
 	end)
 	
-	if success then
-		print("[DataStore] Successfully saved data for user", userId)
-	else
+	if not success then
 		warn("[DataStore] Failed to save data for user", userId, ":", errorMessage)
 		-- Re-add to queue to retry later
 		table.insert(saveQueue, saveItem)
@@ -133,43 +132,39 @@ end
 -- AUTO-SAVE
 --------------------------------------------------------------------------------
 
--- Auto-save all players when server shuts down
-game:BindToClose(function()
-	print("[DataStore] Server shutting down, saving all player data")
-	
-	for _, player in ipairs(Players:GetPlayers()) do
-		local userId = player.UserId
-		if dataCache[userId] then
-			local success, errorMessage = pcall(function()
-				playerDataStore:SetAsync(userId, dataCache[userId])
-			end)
-			
-			if success then
-				print("[DataStore] Saved data for", player.Name)
-			else
-				warn("[DataStore] Failed to save data for", player.Name, ":", errorMessage)
-			end
-		end
-	end
-end)
-
 -- Auto-save when player leaves
 Players.PlayerRemoving:Connect(function(player)
 	local userId = player.UserId
 	
-	if dataCache[userId] then
+	if dataCache[userId] and not savedPlayers[userId] then
+		savedPlayers[userId] = true
 		local success, errorMessage = pcall(function()
 			playerDataStore:SetAsync(userId, dataCache[userId])
 		end)
 		
-		if success then
-			print("[DataStore] Saved data for", player.Name)
-		else
+		if not success then
 			warn("[DataStore] Failed to save data for", player.Name, ":", errorMessage)
 		end
 		
 		-- Remove from cache
 		dataCache[userId] = nil
+	end
+end)
+
+-- Auto-save all players when server shuts down
+game:BindToClose(function()
+	for _, player in ipairs(Players:GetPlayers()) do
+		local userId = player.UserId
+		if dataCache[userId] and not savedPlayers[userId] then
+			savedPlayers[userId] = true
+			local success, errorMessage = pcall(function()
+				playerDataStore:SetAsync(userId, dataCache[userId])
+			end)
+			
+			if not success then
+				warn("[DataStore] Failed to save data for", player.Name, ":", errorMessage)
+			end
+		end
 	end
 end)
 
@@ -183,9 +178,7 @@ spawn(function()
 				playerDataStore:SetAsync(userId, data)
 			end)
 			
-			if success then
-				print("[DataStore] Auto-saved data for user", userId)
-			else
+			if not success then
 				warn("[DataStore] Auto-save failed for user", userId, ":", errorMessage)
 			end
 		end

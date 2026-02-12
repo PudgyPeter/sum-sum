@@ -70,6 +70,9 @@ function GameManager.ToggleSpeed(player)
 	return newSpeed
 end
 
+-- Callback set by Main.lua to trigger the next wave
+GameManager.OnSkipWave = nil
+
 -- Function to skip current wave (spawn next wave while current is active)
 function GameManager.SkipWave(player)
 	print("[GameManager] Skip wave requested by", player.Name)
@@ -96,7 +99,11 @@ function GameManager.SkipWave(player)
 		end
 	end
 	
-	print("[GameManager] Wave skipped - advancing to next wave")
+	-- Advance to next wave and trigger it immediately
+	if ActManager.NextWave() and GameManager.OnSkipWave then
+		GameManager.OnSkipWave()
+	end
+	
 	return true
 end
 

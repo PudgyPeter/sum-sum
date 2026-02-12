@@ -59,16 +59,12 @@ local playerData = player:WaitForChild("PlayerData", 5)
 if playerData then
 	local loadoutFolder = playerData:FindFirstChild("Loadout")
 	if loadoutFolder then
-		print("[GameController] Found Loadout folder with", #loadoutFolder:GetChildren(), "children")
 		for _, tower in ipairs(loadoutFolder:GetChildren()) do
-			print("[GameController] Found child:", tower.Name, "IsStringValue:", tower:IsA("StringValue"))
 			if tower:IsA("StringValue") then
 				-- Extract slot number from name (e.g., "Slot_3" -> 3)
 				local slotNumber = tonumber(tower.Name:match("Slot_(%d+)"))
-				print("[GameController] Extracted slotNumber:", slotNumber, "from", tower.Name, "value:", tower.Value)
 				if slotNumber and slotNumber >= 1 and slotNumber <= 6 then
 					playerLoadout[slotNumber] = tower.Value
-					print("[GameController] Set playerLoadout[" .. slotNumber .. "] =", tower.Value)
 				end
 			end
 		end
@@ -79,11 +75,7 @@ else
 	print("[GameController] No PlayerData found for player")
 end
 
--- Debug: Print final loadout
-print("[GameController] Final playerLoadout:")
-for i = 1, 6 do
-	print("  Slot", i, "=", playerLoadout[i])
-end
+-- Loadout loaded (debug details removed to reduce log spam)
 
 local function UpdateTowerCounts()
 	placedTowerCounts = {}
@@ -558,37 +550,26 @@ local function SetGui()
 
 	-- Setup SkipWave button if it exists
 	local skipWaveButton = gui:FindFirstChild("SkipWave")
-	print("[SKIP WAVE DEBUG] Button found:", skipWaveButton ~= nil)
 
 	if skipWaveButton then
 		-- Hide initially
 		skipWaveButton.Visible = false
-		print("[SKIP WAVE DEBUG] Button hidden initially")
 
 		-- Track current wave timer
 		local skipButtonTimer = nil
 
 		skipWaveButton.Activated:Connect(function()
-			print("[SKIP WAVE DEBUG] Button clicked!")
+			skipWaveButton.Visible = false
 			local SkipWaveFunction = ReplicatedStorage.Functions:WaitForChild("SkipWave")
-			print("[SKIP WAVE DEBUG] Calling server SkipWave function...")
 			local success = SkipWaveFunction:InvokeServer()
 
-			if success then
-				print("[SKIP WAVE DEBUG] Wave skipped successfully")
-				skipWaveButton.Visible = false
-				if skipButtonTimer then
-					task.cancel(skipButtonTimer)
-					skipButtonTimer = nil
-				end
-			else
-				warn("[SKIP WAVE DEBUG] Failed to skip wave")
+			if not success then
+				warn("[GameController] Failed to skip wave")
 			end
 		end)
 
 		-- Show skip button 15 seconds after wave starts
 		info.Wave.Changed:Connect(function(wave)
-			print("[GameController] Wave changed to:", wave)
 			
 			-- Wave is now relative (1-15 within each act)
 			-- Get act info for display
@@ -618,8 +599,8 @@ local function SetGui()
 			local canSkip = wave > 0 and wave < wavesPerAct
 			
 			if canSkip then
-				print("[GameController] Starting skip timer for wave", wave)
-				skipButtonTimer = task.delay(15, function()
+				local adjustedDelay = GameSpeed.GetWaitTime(15)
+				skipButtonTimer = task.delay(adjustedDelay, function()
 					local mobCount = #workspace.Mobs:GetChildren()
 					if mobCount > 0 then
 						skipWaveButton.Visible = true
@@ -631,15 +612,11 @@ local function SetGui()
 
 		-- Hide button when all mobs are cleared
 		workspace.Mobs.ChildRemoved:Connect(function()
-			local mobCount = #workspace.Mobs:GetChildren()
-			print("[SKIP WAVE DEBUG] Mob removed. Remaining mobs:", mobCount)
-			if mobCount == 0 then
+			if #workspace.Mobs:GetChildren() == 0 then
 				skipWaveButton.Visible = false
-				print("[SKIP WAVE DEBUG] All mobs cleared, button hidden")
 				if skipButtonTimer then
 					task.cancel(skipButtonTimer)
 					skipButtonTimer = nil
-					print("[SKIP WAVE DEBUG] Timer cancelled")
 				end
 			end
 		end)
@@ -673,7 +650,6 @@ local function SetGui()
 			if newSpeed then
 				GameSpeed.SetSpeed(newSpeed)
 				speedButton.Speed.Text = "Speed: " .. newSpeed .. "x"
-				print("[SPEED] Game speed changed to", newSpeed .. "x")
 			end
 		end)
 
@@ -682,7 +658,6 @@ local function SetGui()
 		SpeedChangedEvent.OnClientEvent:Connect(function(newSpeed)
 			GameSpeed.SetSpeed(newSpeed)
 			speedButton.Speed.Text = "Speed: " .. newSpeed .. "x"
-			print("[SPEED] Game speed synchronized to", newSpeed .. "x")
 		end)
 	else
 		print("[SPEED] No SpeedToggle button found in GUI")

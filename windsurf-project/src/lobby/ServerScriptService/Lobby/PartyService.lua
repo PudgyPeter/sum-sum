@@ -667,6 +667,7 @@ function PartyService.GetPartyInfo()
 end
 
 -- Get available maps for the party (respecting progress limits)
+-- Returns ALL maps with IsUnlocked status (matching solo format)
 function PartyService.GetAvailableMapsForParty(players)
 	local partyProgress = PartyService.CalculatePartyProgress(players)
 	if not partyProgress then return {} end
@@ -675,31 +676,29 @@ function PartyService.GetAvailableMapsForParty(players)
 	local availableMaps = {}
 	
 	for i, map in ipairs(allMaps) do
-		if i <= partyProgress.mapIndex then
-			-- Calculate available acts for this map
-			local maxAct = (i == partyProgress.mapIndex) and partyProgress.actNumber or #map.Acts
-			
-			local acts = {}
-			for actNum = 1, maxAct do
-				table.insert(acts, {
-					ActNumber = actNum,
-					IsUnlocked = true,
-					ActInfo = map.Acts[actNum]
-				})
-			end
-			
-			table.insert(availableMaps, {
-				ID = map.ID,
-				Name = map.Name,
-				Description = map.Description,
-				Difficulty = map.Difficulty,
-				ImageId = map.ImageId,
-				PlaceId = map.PlaceId,
-				IsUnlocked = true,
-				AvailableActs = acts,
-				MaxAct = maxAct
-			})
+		local isUnlocked = i <= partyProgress.mapIndex
+		
+		-- For earlier maps all acts are completed; for the current map, completed up to actNumber - 1
+		local highestCompletedAct = 0
+		if i < partyProgress.mapIndex then
+			highestCompletedAct = #map.Acts -- earlier map, all acts done
+		elseif i == partyProgress.mapIndex then
+			highestCompletedAct = partyProgress.actNumber - 1 -- actNumber is next accessible
 		end
+		
+		table.insert(availableMaps, {
+			ID = map.ID,
+			Name = map.Name,
+			Description = map.Description,
+			Difficulty = map.Difficulty,
+			ImageId = map.ImageId,
+			PlaceId = map.PlaceId,
+			IsUnlocked = isUnlocked,
+			HighestCompletedAct = highestCompletedAct,
+			TotalActs = #map.Acts,
+			IsFullyCompleted = highestCompletedAct >= #map.Acts,
+			MapIndex = i
+		})
 	end
 	
 	return availableMaps
@@ -825,6 +824,7 @@ end
 local GetPartyActsFunction = functions:WaitForChild("GetPartyActs")
 
 -- Get available acts for a specific map respecting party restrictions
+-- Returns ALL acts with IsUnlocked status (matching solo format)
 function PartyService.GetAvailableActsForParty(players, mapId)
 	local partyProgress = PartyService.CalculatePartyProgress(players)
 	if not partyProgress then return {} end
@@ -832,28 +832,41 @@ function PartyService.GetAvailableActsForParty(players, mapId)
 	local map = MapData.GetMapById(mapId)
 	if not map then return {} end
 	
+	if not map.Acts then return {} end
+	
 	local targetMapIndex = MapData.GetMapIndex(mapId)
 	if not targetMapIndex then return {} end
 	
-	-- Check if this map is accessible
+	local allActs = {}
+	local maxAct
 	if targetMapIndex > partyProgress.mapIndex then
-		return {} -- Map not accessible
+		maxAct = 0 -- Map not accessible, no acts unlocked
+	elseif targetMapIndex == partyProgress.mapIndex then
+		maxAct = partyProgress.actNumber
+	else
+		maxAct = #map.Acts -- Earlier map, all acts accessible
 	end
 	
-	local availableActs = {}
-	local maxAct = (targetMapIndex == partyProgress.mapIndex) and partyProgress.actNumber or #map.Acts
+	-- Determine highest completed act for this map within party context
+	local highestCompletedAct = 0
+	if targetMapIndex < partyProgress.mapIndex then
+		highestCompletedAct = #map.Acts -- earlier map, all acts done
+	elseif targetMapIndex == partyProgress.mapIndex then
+		highestCompletedAct = partyProgress.actNumber - 1 -- actNumber is next accessible
+	end
 	
-	for actNum = 1, maxAct do
-		table.insert(availableActs, {
+	for actNum = 1, #map.Acts do
+		local isUnlocked = actNum <= maxAct
+		table.insert(allActs, {
 			ActNumber = actNum,
-			IsUnlocked = true,
-			IsCompleted = false, -- Party doesn't track completion status
+			IsUnlocked = isUnlocked,
+			IsCompleted = actNum <= highestCompletedAct,
 			ActInfo = map.Acts[actNum],
 			MapImageId = map.ImageId
 		})
 	end
 	
-	return availableActs
+	return allActs
 end
 
 GetPartyActsFunction.OnServerInvoke = function(player, mapId)

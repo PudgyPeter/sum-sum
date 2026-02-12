@@ -76,7 +76,8 @@ function mob.Move(mob, map)
 	end
 
 	-- Calculate damage based on mob type
-	local damage = mob.Health -- Default fallback
+	local humanoid = mob:FindFirstChild("Humanoid")
+	local damage = humanoid and humanoid.Health or 1 -- Default fallback
 	local bossType = mob:FindFirstChild("BossType")
 	
 	if bossType then
@@ -104,6 +105,8 @@ function mob.Spawn(name, quantity, map, waveNumber)
 	local mobExists = ServerStorage.Mobs:FindFirstChild(name)
 	if mobExists then
 		for i=1, quantity do
+			-- Stop spawning if base is destroyed
+			if map.Base.Humanoid.Health <= 0 then break end
 			task.wait(GameSpeed.GetWaitTime(0.5))
 			local newMob = mobExists:Clone()
 			
@@ -123,8 +126,9 @@ function mob.Spawn(name, quantity, map, waveNumber)
 					baseSpeedValue.Value = stats.Speed
 					baseSpeedValue.Parent = newMob
 					
-					print(string.format("[MOB] Spawned %s (Wave %d): HP=%d, Speed=%d, Damage=%d, Reward=%d", 
-						name, waveNumber, stats.Health, stats.Speed, stats.Damage, stats.Reward))
+					-- Verbose per-mob log disabled to reduce spam
+				-- print(string.format("[MOB] Spawned %s (Wave %d): HP=%d, Speed=%d, Damage=%d, Reward=%d", 
+				-- 	name, waveNumber, stats.Health, stats.Speed, stats.Damage, stats.Reward))
 				end
 			end
 			
@@ -196,13 +200,7 @@ function mob.SpawnBoss(waveNumber, map)
 		return
 	end
 	
-	print("=== BOSS SPAWN DEBUG ===")
-	print("Template humanoid health:", baseMob:FindFirstChild("Humanoid") and baseMob.Humanoid.Health or "NO HUMANOID")
-	
 	local boss = baseMob:Clone()
-	
-	-- IMPORTANT: Check if template already has death events
-	print("Boss humanoid health after clone:", boss:FindFirstChild("Humanoid") and boss.Humanoid.Health or "NO HUMANOID")
 	
 	-- Get humanoid reference
 	local humanoid = boss:FindFirstChild("Humanoid")
@@ -241,49 +239,7 @@ function mob.SpawnBoss(waveNumber, map)
 	
 	-- Boss spawn notification will be handled by client-side boss detection
 	
-	-- Spawn boss with delay for dramatic effect
-	task.wait(GameSpeed.GetWaitTime(1))
-	-- Spawn boss 15 studs in front of spawn to avoid getting stuck in cave
-	local spawnCFrame = map.Start.CFrame * CFrame.new(0, 0, -15)
-	boss.HumanoidRootPart.CFrame = spawnCFrame
-	boss.Parent = workspace.Mobs
-	boss.HumanoidRootPart:SetNetworkOwner(nil)
-	
-	-- CRITICAL: Set health AFTER parenting (Roblox resets humanoid properties on parenting)
-	-- Wait for Roblox to process the parenting operation
-	task.wait()
-	local bossHealth = BossData.GetBossHealth(waveNumber)
-	print("Setting boss health after parenting...")
-	humanoid.MaxHealth = bossHealth
-	humanoid.Health = bossHealth
-	print("Boss health set:", humanoid.Health, "/", humanoid.MaxHealth)
-	
-	-- Monitor health for first 10 seconds
-	print("Boss spawned! Starting health monitoring...")
-	print("Initial health:", humanoid.Health, "/", humanoid.MaxHealth)
-	local startTime = tick()
-	local lastHealth = humanoid.Health
-	local connection
-	connection = humanoid.HealthChanged:Connect(function(newHealth)
-		local elapsed = tick() - startTime
-		local damageTaken = lastHealth - newHealth
-		if damageTaken > 0 then
-			print(string.format("[%.2fs] Boss took %d damage! Health: %d/%d", elapsed, damageTaken, newHealth, humanoid.MaxHealth))
-		end
-		lastHealth = newHealth
-		if newHealth <= 0 then
-			connection:Disconnect()
-		end
-	end)
-	
-	-- Auto-stop monitoring after 10 seconds
-	task.delay(10, function()
-		if connection then
-			connection:Disconnect()
-			print("Health monitoring stopped - boss survived 10 seconds")
-		end
-	end)
-	
+	-- Create MovingTo BEFORE parenting so towers don't error when targeting
 	local movingTo = Instance.new("IntValue")
 	movingTo.Name = "MovingTo"
 	movingTo.Parent = boss
@@ -294,39 +250,29 @@ function mob.SpawnBoss(waveNumber, map)
 	baseSpeedValue.Value = bossData.BaseSpeed
 	baseSpeedValue.Parent = boss
 	
-	-- Set collision groups
+	-- Set collision groups before parenting
 	for _, object in ipairs(boss:GetDescendants()) do
 		if object:IsA("BasePart") then
 			object.CollisionGroup = "Mob"
 		end
 	end
 	
-	-- Enhanced boss death event
+	-- Spawn boss with delay for dramatic effect
+	task.wait(GameSpeed.GetWaitTime(1))
+	-- Spawn boss 15 studs in front of spawn to avoid getting stuck in cave
+	local spawnCFrame = map.Start.CFrame * CFrame.new(0, 0, -15)
+	boss.HumanoidRootPart.CFrame = spawnCFrame
+	boss.Parent = workspace.Mobs
+	boss.HumanoidRootPart:SetNetworkOwner(nil)
+	
+	-- CRITICAL: Set health AFTER parenting (Roblox resets humanoid properties on parenting)
+	task.wait()
+	local bossHealth = BossData.GetBossHealth(waveNumber)
+	humanoid.MaxHealth = bossHealth
+	humanoid.Health = bossHealth
+	
+	-- Boss death event
 	boss.Humanoid.Died:Connect(function()
-		print("=== BOSS DEATH INVESTIGATION ===")
-		print("Boss:", bossData.Name)
-		print("Wave:", waveNumber)
-		print("Time since spawn:", tick())
-		print("Last damage source:", boss.Humanoid:FindFirstChild("Creator") and boss.Humanoid.Creator.Value or "No creator tag")
-		
-		-- Check what towers are in range
-		local towersInRange = 0
-		if boss:FindFirstChild("HumanoidRootPart") then
-			for _, tower in ipairs(workspace.Towers:GetChildren()) do
-				if tower:FindFirstChild("HumanoidRootPart") then
-					local distance = (tower.HumanoidRootPart.Position - boss.HumanoidRootPart.Position).Magnitude
-					local towerRange = tower.Config and tower.Config.Range.Value or 0
-					if distance <= towerRange then
-						towersInRange = towersInRange + 1
-						print("Tower in range:", tower.Name, "Distance:", distance, "Range:", towerRange)
-					end
-				end
-			end
-			print("Total towers in range:", towersInRange)
-		else
-			print("Boss HumanoidRootPart missing - cannot check tower ranges")
-		end
-		
 		-- Award bonus reward
 		local reward = BossData.GetBossReward(waveNumber)
 		for _, player in ipairs(game.Players:GetPlayers()) do

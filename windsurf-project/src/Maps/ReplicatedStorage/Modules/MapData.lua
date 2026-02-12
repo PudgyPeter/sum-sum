@@ -59,14 +59,12 @@ MapData.Maps = {
 
 -- Helper: Get map by ID
 function MapData.GetMapById(mapId)
-	print("MapData.GetMapById called with:", mapId)
 	for _, map in ipairs(MapData.Maps) do
 		if map.ID == mapId then
-			print("MapData: Found map:", map.Name)
 			return map
 		end
 	end
-	print("MapData: Map not found:", mapId)
+	warn("MapData: Map not found:", mapId)
 	return nil
 end
 

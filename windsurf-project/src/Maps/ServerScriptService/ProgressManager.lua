@@ -12,6 +12,7 @@ local PLAYER_DATA_STORE_NAME = "PlayerData_v7"
 local PlayerDataStore = DataStoreService:GetDataStore(PLAYER_DATA_STORE_NAME)
 
 local ProgressManager = {}
+local savedPlayers = {}
 
 -- Save player's progress to lobby DataStore
 local function SavePlayerProgress(player)
@@ -28,7 +29,7 @@ local function SavePlayerProgress(player)
 		return false
 	end
 	
-	print("[Progress] Saving progress for", player.Name, "- Gems:", gems.Value)
+	-- print("[Progress] Saving progress for", player.Name, "- Gems:", gems.Value)
 	
 	-- Use UpdateAsync to safely modify only the fields we care about
 	local success, err = pcall(function()
@@ -48,13 +49,12 @@ local function SavePlayerProgress(player)
 				-- oldData.Stats.TotalGamesPlayed = oldData.Stats.TotalGamesPlayed + 1
 			end
 			
-			print("[Progress] Updated data for", player.Name, "- New Gems:", oldData.Gems)
+			-- print("[Progress] Updated data for", player.Name, "- New Gems:", oldData.Gems)
 			return oldData
 		end)
 	end)
 	
 	if success then
-		print("[Progress] Successfully saved progress for", player.Name)
 		return true
 	else
 		warn("[Progress] Failed to save progress for", player.Name, ":", err)
@@ -64,17 +64,20 @@ end
 
 -- Auto-save when player leaves
 Players.PlayerRemoving:Connect(function(player)
-	print("[Progress] Player leaving, saving progress for", player.Name)
-	SavePlayerProgress(player)
+	if not savedPlayers[player.UserId] then
+		savedPlayers[player.UserId] = true
+		SavePlayerProgress(player)
+	end
 end)
 
 -- Save all players on server shutdown
 game:BindToClose(function()
-	print("[Progress] Server shutting down, saving all player progress")
-	
 	local players = Players:GetPlayers()
 	for _, player in ipairs(players) do
-		SavePlayerProgress(player)
+		if not savedPlayers[player.UserId] then
+			savedPlayers[player.UserId] = true
+			SavePlayerProgress(player)
+		end
 	end
 	
 	-- Give DataStore time to save

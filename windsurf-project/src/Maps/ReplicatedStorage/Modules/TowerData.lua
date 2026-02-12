@@ -102,6 +102,16 @@ TowerData.Towers = {
 	]]
 }
 
+-- Get tower by ModelName
+function TowerData.GetTowerByModelName(modelName)
+	for _, tower in ipairs(TowerData.Towers) do
+		if tower.ModelName == modelName then
+			return tower
+		end
+	end
+	return nil
+end
+
 -- Get tower by ID
 function TowerData.GetTowerById(id)
 	for _, tower in ipairs(TowerData.Towers) do

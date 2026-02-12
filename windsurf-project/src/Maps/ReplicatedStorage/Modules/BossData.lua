@@ -2,7 +2,7 @@ local BossData = {
 
 	-- Wave 15 Final Boss
 	Boss3 = {
-		Name = "big guy",
+		Name = "Evil Clown",
 		BaseHealth = 4000,  -- Reduced from 20000 for debugging
 		BaseDamage = 50,
 		BaseSpeed = 5,

@@ -3,11 +3,12 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local GameSpeed = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("GameSpeed"))
 local round = {}
 
-print("[Round] Loaded - Act-based state system (waves 1-15 per act)")
 
 -- Helper function to spawn multiple mob types
 local function spawnWave(mobTypes, map, wave)
 	for _, mobData in ipairs(mobTypes) do
+		-- Stop spawning if base is destroyed
+		if map.Base.Humanoid.Health <= 0 then break end
 		mob.Spawn(mobData.name, mobData.count, map, wave)
 		if mobData.delay then
 			task.wait(GameSpeed.GetWaitTime(mobData.delay))
@@ -89,7 +90,7 @@ local function getAct1Wave(wave, map)
 			{name = "illxstrate", count = 8, delay = 2}
 		}, map, wave)
 		task.wait(GameSpeed.GetWaitTime(2))
-		mob.SpawnBoss(1, map) -- Act 1 boss
+		mob.SpawnBoss(wave, map) -- Act 1 boss
 	end
 end
 
@@ -174,7 +175,7 @@ local function getAct2Wave(wave, map)
 			{name = "illxstrate", count = 15, delay = 2}
 		}, map, wave)
 		task.wait(GameSpeed.GetWaitTime(2))
-		mob.SpawnBoss(2, map) -- Act 2 boss
+		mob.SpawnBoss(wave, map) -- Act 2 boss
 	end
 end
 
@@ -189,7 +190,7 @@ local function getAct3Wave(wave, map)
 			{name = "illxstrate", count = 20, delay = 2}
 		}, map, wave)
 		task.wait(GameSpeed.GetWaitTime(2))
-		mob.SpawnBoss(3, map) -- Act 3 boss
+		mob.SpawnBoss(wave, map) -- Act 3 boss
 	else
 		spawnWave({
 			{name = "PudgePete", count = baseCount},
@@ -210,7 +211,7 @@ local function getAct4Wave(wave, map)
 			{name = "illxstrate", count = 25, delay = 2}
 		}, map, wave)
 		task.wait(GameSpeed.GetWaitTime(2))
-		mob.SpawnBoss(4, map) -- Act 4 boss
+		mob.SpawnBoss(wave, map) -- Act 4 boss
 	else
 		spawnWave({
 			{name = "PudgePete", count = baseCount},
@@ -231,7 +232,7 @@ local function getAct5Wave(wave, map)
 			{name = "illxstrate", count = 30, delay = 2}
 		}, map, wave)
 		task.wait(GameSpeed.GetWaitTime(2))
-		mob.SpawnBoss(5, map) -- Act 5 boss (final boss)
+		mob.SpawnBoss(wave, map) -- Act 5 boss (final boss)
 	else
 		spawnWave({
 			{name = "PudgePete", count = baseCount},
@@ -243,7 +244,6 @@ end
 
 -- Main function: takes act and wave (both 1-indexed)
 function round.GetWave(act, wave, map)
-	print("[Round] Act", act, "Wave", wave)
 	
 	if act == 1 then
 		getAct1Wave(wave, map)

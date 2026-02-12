@@ -83,6 +83,9 @@ function Tower.FindTarget (newTower,range, mode)
 			continue
 		end
 		
+		if not mob:FindFirstChild("HumanoidRootPart") or not mob:FindFirstChild("MovingTo") then
+			continue
+		end
 		local distanceToMob = (mob.HumanoidRootPart.Position - newTower.HumanoidRootPart.Position).Magnitude
 		local distanceToWaypoint = (mob.HumanoidRootPart.Position - map.Waypoints[mob.MovingTo.Value].Position).Magnitude
 
@@ -135,129 +138,123 @@ end
 
 function Tower.Attack(newTower, player)
 	local config = newTower.Config
-	local target = Tower.FindTarget(newTower, config.Range.Value, config.TargetMode.Value)
+	
+	while newTower and newTower.Parent do
+		local target = Tower.FindTarget(newTower, config.Range.Value, config.TargetMode.Value)
 
-	if target and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 then
+		if target and target:FindFirstChild("Humanoid") and target.Humanoid.Health > 0 then
 
-		local targetCFrame = CFrame.lookAt(newTower.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
-		newTower.HumanoidRootPart.BodyGyro.CFrame = targetCFrame
+			local targetCFrame = CFrame.lookAt(newTower.HumanoidRootPart.Position, target.HumanoidRootPart.Position)
+			newTower.HumanoidRootPart.BodyGyro.CFrame = targetCFrame
 
-		AnimateTowerEvent:FireAllClients(newTower, "Attack", target)
+			AnimateTowerEvent:FireAllClients(newTower, "Attack", target)
 
-		local damageAmount = config.Damage.Value
-		local isCrit = false
-		
-		-- Check for critical hit
-		local critChance = config:FindFirstChild("CritChance")
-		local critDamage = config:FindFirstChild("CritDamage")
-		
-		if critChance and critDamage then
-			local roll = math.random(1, 100)
-			if roll <= critChance.Value then
-				-- Critical hit!
-				isCrit = true
-				damageAmount = damageAmount * critDamage.Value
-			end
-		end
-		
-		-- Apply color type damage multiplier
-		-- Check config first, then fallback to TowerData lookup by tower name
-		local towerType = config:FindFirstChild("ColorType") and config.ColorType.Value
-		if not towerType then
-			towerType = TowerData.GetColorType(newTower.Name) or TowerData.GetColorType(newTower.Name .. "_Base")
-		end
-		local mobType = target:FindFirstChild("ColorType") and target.ColorType.Value
-		local typeMult = ColorTypeSystem.GetDamageMultiplier(towerType, mobType)
-		if typeMult ~= 1.0 then
-			damageAmount = math.floor(damageAmount * typeMult)
-		end
-		
-		-- Debug: Log damage for bosses
-		if target:FindFirstChild("BossType") then
-			print(string.format("TOWER ATTACK DEBUG: Tower=%s, Damage=%d%s, Boss=%s, BossHP=%d/%d", 
-				newTower.Name, damageAmount, isCrit and " (CRIT!)" or "", target:FindFirstChild("BossType").Value, 
-				target.Humanoid.Health, target.Humanoid.MaxHealth))
-		end
-		
-		local isKillingBlow = target.Humanoid.Health <= damageAmount
-		target.Humanoid:TakeDamage(damageAmount)
-		
-		-- Apply status effects if tower has them
-		local statusType = config:FindFirstChild("StatusType")
-		if statusType and statusType.Value ~= "None" and target.Humanoid.Health > 0 then
-			local statusConfig = config:FindFirstChild("StatusEffectConfig")
-			Tower.ApplyStatusEffect(target, statusType.Value, statusConfig, newTower)
-		end
-		
-		-- Track tower stats
-		local stats = config:FindFirstChild("Stats")
-		if not stats then
-			stats = Instance.new("Folder")
-			stats.Name = "Stats"
-			stats.Parent = config
+			local damageAmount = config.Damage.Value
+			local isCrit = false
 			
-			local totalDamage = Instance.new("NumberValue")
-			totalDamage.Name = "TotalDamage"
-			totalDamage.Value = 0
-			totalDamage.Parent = stats
+			-- Check for critical hit
+			local critChance = config:FindFirstChild("CritChance")
+			local critDamage = config:FindFirstChild("CritDamage")
 			
-			local kills = Instance.new("IntValue")
-			kills.Name = "Kills"
-			kills.Value = 0
-			kills.Parent = stats
-		end
-		
-		-- Update total damage
-		local totalDamageValue = stats:FindFirstChild("TotalDamage")
-		if totalDamageValue then
-			totalDamageValue.Value = totalDamageValue.Value + damageAmount
-		end
-		
-		-- Fire damage event to tower owner for stats tracking
-		PlayerDamageEvent:FireClient(player, damageAmount)
-		
-		-- Fire damage indicator to all clients (with killing blow flag)
-		DamageIndicatorEvent:FireAllClients(target, damageAmount, isKillingBlow)
-
-		if target.Humanoid.Health <= 0 then
-			local baseReward = target.Humanoid.MaxHealth / 5
-			local sharedReward = baseReward * 0.5
-			local killerBonus = baseReward * 0.5
-			
-			-- Give 50% to all players
-			for _, plr in ipairs(game.Players:GetPlayers()) do
-				plr.Cash.Value += sharedReward
+			if critChance and critDamage then
+				local roll = math.random(1, 100)
+				if roll <= critChance.Value then
+					-- Critical hit!
+					isCrit = true
+					damageAmount = damageAmount * critDamage.Value
+				end
 			end
 			
-			-- Give additional 50% to tower owner (total 100% for killer)
-			player.Cash.Value += killerBonus
-			
-			-- Update kill count
-			local killsValue = stats:FindFirstChild("Kills")
-			if killsValue then
-				killsValue.Value = killsValue.Value + 1
+			-- Apply color type damage multiplier
+			-- Check config attribute first, then fallback to TowerData lookup by model name
+			local towerType = config:GetAttribute("ColorType")
+			if not towerType then
+				local towerInfo = TowerData.GetTowerByModelName(newTower.Name)
+				towerType = towerInfo and towerInfo.ColorType
+			end
+			local mobType = target:FindFirstChild("ColorType") and target.ColorType.Value
+			local typeMult = ColorTypeSystem.GetDamageMultiplier(towerType, mobType)
+			if typeMult ~= 1.0 then
+				damageAmount = math.floor(damageAmount * typeMult)
 			end
 			
-			-- Award XP based on mob type
-			local xpEvent = "MobKill"
-			if target:FindFirstChild("BossType") then
-				xpEvent = "BossKill"
-			elseif target:FindFirstChild("IsElite") and target.IsElite.Value then
-				xpEvent = "EliteKill"
-			end
-			XPManager.AwardForEvent(player, newTower, xpEvent)
 			
-			-- Notify tower owner of kill for per-player stats
-			PlayerKillEvent:FireClient(player)
+			local isKillingBlow = target.Humanoid.Health <= damageAmount
+			target.Humanoid:TakeDamage(damageAmount)
+			
+			-- Apply status effects if tower has them
+			local statusType = config:FindFirstChild("StatusType")
+			if statusType and statusType.Value ~= "None" and target.Humanoid.Health > 0 then
+				local statusConfig = config:FindFirstChild("StatusEffectConfig")
+				Tower.ApplyStatusEffect(target, statusType.Value, statusConfig, newTower)
+			end
+			
+			-- Track tower stats
+			local stats = config:FindFirstChild("Stats")
+			if not stats then
+				stats = Instance.new("Folder")
+				stats.Name = "Stats"
+				stats.Parent = config
+				
+				local totalDamage = Instance.new("NumberValue")
+				totalDamage.Name = "TotalDamage"
+				totalDamage.Value = 0
+				totalDamage.Parent = stats
+				
+				local kills = Instance.new("IntValue")
+				kills.Name = "Kills"
+				kills.Value = 0
+				kills.Parent = stats
+			end
+			
+			-- Update total damage
+			local totalDamageValue = stats:FindFirstChild("TotalDamage")
+			if totalDamageValue then
+				totalDamageValue.Value = totalDamageValue.Value + damageAmount
+			end
+			
+			-- Fire damage event to tower owner for stats tracking
+			PlayerDamageEvent:FireClient(player, damageAmount)
+			
+			-- Fire damage indicator to all clients (with killing blow flag)
+			DamageIndicatorEvent:FireAllClients(target, damageAmount, isKillingBlow)
+
+			if target.Humanoid.Health <= 0 then
+				local baseReward = target.Humanoid.MaxHealth / 5
+				local sharedReward = baseReward * 0.5
+				local killerBonus = baseReward * 0.5
+				
+				-- Give 50% to all players
+				for _, plr in ipairs(game.Players:GetPlayers()) do
+					plr.Cash.Value += sharedReward
+				end
+				
+				-- Give additional 50% to tower owner (total 100% for killer)
+				player.Cash.Value += killerBonus
+				
+				-- Update kill count
+				local killsValue = stats:FindFirstChild("Kills")
+				if killsValue then
+					killsValue.Value = killsValue.Value + 1
+				end
+				
+				-- Award XP based on mob type
+				local xpEvent = "MobKill"
+				if target:FindFirstChild("BossType") then
+					xpEvent = "BossKill"
+				elseif target:FindFirstChild("IsElite") and target.IsElite.Value then
+					xpEvent = "EliteKill"
+				end
+				XPManager.AwardForEvent(player, newTower, xpEvent)
+				
+				-- Notify tower owner of kill for per-player stats
+				PlayerKillEvent:FireClient(player)
+			end
+
+			task.wait(GameSpeed.GetWaitTime(config.SPA.Value))
 		end
 
-		task.wait(GameSpeed.GetWaitTime(config.SPA.Value))
-	end
-
-	task.wait(GameSpeed.GetWaitTime(0.1))
-
-	if newTower and newTower.Parent then
-		Tower.Attack(newTower, player)
+		task.wait(GameSpeed.GetWaitTime(0.1))
 	end
 end
 
@@ -297,7 +294,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			-- Reset timer
 			existingBurn.Duration.Value = duration
 			existingBurn.TickDamage.Value = tickDamage
-			print(string.format("[STATUS] Burn refreshed on %s - %d damage over %ds", target.Name, tickDamage, duration))
 		else
 			-- Create new burn effect
 			local burnEffect = Instance.new("Folder")
@@ -324,7 +320,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			lastTick.Value = tick()
 			lastTick.Parent = burnEffect
 			
-			print(string.format("[STATUS] Burn applied to %s - %d damage over %ds", target.Name, tickDamage, duration))
 			
 			-- Start DoT coroutine
 			Tower.StartDoTEffect(target, burnEffect, "Burn")
@@ -369,12 +364,10 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			lastTick.Value = tick()
 			lastTick.Parent = bleedEffect
 			
-			print(string.format("[STATUS] Bleed stack %d applied to %s - %d damage over %ds", stackNumber, target.Name, tickDamage, duration))
 			
 			-- Start DoT coroutine for this stack
 			Tower.StartDoTEffect(target, bleedEffect, "Bleed")
 		else
-			print(string.format("[STATUS] Bleed max stacks (%d) reached on %s", maxStacks or 10, target.Name))
 		end
 	
 	-- Handle Hellfire (weaker burn with damage boost to other burns)
@@ -384,7 +377,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			-- Reset timer
 			existingHellfire.Duration.Value = duration
 			existingHellfire.TickDamage.Value = tickDamage
-			print(string.format("[STATUS] Hellfire refreshed on %s - %d damage over %ds", target.Name, tickDamage, duration))
 		else
 			-- Create new hellfire effect
 			local hellfireEffect = Instance.new("Folder")
@@ -417,8 +409,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			boostMultiplier.Value = effectData.BurnBoostMultiplier
 			boostMultiplier.Parent = hellfireEffect
 			
-			print(string.format("[STATUS] Hellfire applied to %s - %d damage over %ds (Burn boost: %.1fx)", 
-				target.Name, tickDamage, duration, effectData.BurnBoostMultiplier))
 			
 			-- Start DoT coroutine with burn boost
 			Tower.StartDoTEffect(target, hellfireEffect, "Hellfire")
@@ -434,14 +424,11 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 				if effect.Name == "Burn" or effect.Name == "Hellfire" then
 					local absorbDamage = effect.TickDamage.Value * effectData.AbsorbMultiplier
 					existingBlackFlame.TickDamage.Value = existingBlackFlame.TickDamage.Value + absorbDamage
-					print(string.format("[STATUS] BlackFlame absorbed %s on %s - added %.1f damage", 
-						effect.Name, target.Name, absorbDamage))
 					effect:Destroy()
 					absorbed = true
 				end
 			end
 			if not absorbed then
-				print(string.format("[STATUS] BlackFlame already active on %s - no burns to absorb", target.Name))
 			end
 		else
 			-- Create new black flame effect
@@ -469,15 +456,12 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			lastTick.Value = tick()
 			lastTick.Parent = blackFlameEffect
 			
-			print(string.format("[STATUS] BlackFlame applied to %s - %d damage/tick (PERMANENT)", target.Name, tickDamage))
 			
 			-- Absorb any existing burns
 			for _, effect in ipairs(statusFolder:GetChildren()) do
 				if effect.Name == "Burn" or effect.Name == "Hellfire" then
 					local absorbDamage = effect.TickDamage.Value * effectData.AbsorbMultiplier
 					tickDmg.Value = tickDmg.Value + absorbDamage
-					print(string.format("[STATUS] BlackFlame absorbed %s on %s - added %.1f damage", 
-						effect.Name, target.Name, absorbDamage))
 					effect:Destroy()
 				end
 			end
@@ -490,7 +474,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 	elseif effectName == "Hemorrhage" then
 		local existingHemorrhage = statusFolder:FindFirstChild("Hemorrhage")
 		if existingHemorrhage then
-			print(string.format("[STATUS] Hemorrhage already active on %s", target.Name))
 		else
 			-- Create new hemorrhage effect
 			local hemorrhageEffect = Instance.new("Folder")
@@ -517,7 +500,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			lastTick.Value = tick()
 			lastTick.Parent = hemorrhageEffect
 			
-			print(string.format("[STATUS] Hemorrhage applied to %s - %d damage/tick (PERMANENT)", target.Name, tickDamage))
 			
 			-- Start DoT coroutine
 			Tower.StartDoTEffect(target, hemorrhageEffect, "Hemorrhage")
@@ -529,7 +511,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 		if existingStun then
 			-- Reset timer
 			existingStun.Duration.Value = duration
-			print(string.format("[STATUS] Stun refreshed on %s - %ds", target.Name, duration))
 		else
 			-- Create new stun effect
 			local stunEffect = Instance.new("Folder")
@@ -546,7 +527,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			speedMult.Value = 0 -- Complete stop
 			speedMult.Parent = stunEffect
 			
-			print(string.format("[STATUS] Stun applied to %s - %ds", target.Name, duration))
 			
 			-- Apply movement effect
 			Tower.ApplyMovementEffect(target, stunEffect, "Stun")
@@ -564,8 +544,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			-- Reset timer and update speed
 			existingSlow.Duration.Value = duration
 			existingSlow.SpeedMultiplier.Value = speedMultiplier
-			print(string.format("[STATUS] Slow refreshed on %s - %.0f%% speed for %ds", 
-				target.Name, speedMultiplier * 100, duration))
 		else
 			-- Create new slow effect
 			local slowEffect = Instance.new("Folder")
@@ -582,8 +560,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			speedMult.Value = speedMultiplier
 			speedMult.Parent = slowEffect
 			
-			print(string.format("[STATUS] Slow applied to %s - %.0f%% speed for %ds", 
-				target.Name, speedMultiplier * 100, duration))
 			
 			-- Apply movement effect
 			Tower.ApplyMovementEffect(target, slowEffect, "Slow")
@@ -595,7 +571,6 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 		if existingHypnotized then
 			-- Reset timer
 			existingHypnotized.Duration.Value = duration
-			print(string.format("[STATUS] Hypnotized refreshed on %s - %ds", target.Name, duration))
 		else
 			-- Create new hypnotized effect (placeholder for future implementation)
 			local hypnotizedEffect = Instance.new("Folder")
@@ -607,13 +582,11 @@ function Tower.ApplyStatusEffect(target, effectName, statusConfig, tower)
 			dur.Value = duration
 			dur.Parent = hypnotizedEffect
 			
-			print(string.format("[STATUS] Hypnotized applied to %s - %ds (WIP - not fully implemented)", target.Name, duration))
 			
 			-- Start timer for removal
 			task.spawn(function()
 				task.wait(GameSpeed.GetWaitTime(duration))
 				if hypnotizedEffect.Parent then
-					print(string.format("[STATUS] Hypnotized expired on %s", target.Name))
 					hypnotizedEffect:Destroy()
 				end
 			end)
@@ -633,7 +606,6 @@ function Tower.StartDoTEffect(target, effectFolder, effectName)
 		local lastTick = effectFolder:FindFirstChild("LastTick")
 		
 		if not tickDamage or not duration or not tickRate or not lastTick then
-			warn("[STATUS] Missing DoT parameters for", effectName)
 			return
 		end
 		
@@ -644,7 +616,6 @@ function Tower.StartDoTEffect(target, effectFolder, effectName)
 			
 			-- Check if duration expired
 			if elapsed >= duration.Value then
-				print(string.format("[STATUS] %s expired on %s", effectName, target.Name))
 				effectFolder:Destroy()
 				break
 			end
@@ -662,8 +633,6 @@ function Tower.StartDoTEffect(target, effectFolder, effectName)
 						local boostMult = hellfire:FindFirstChild("BurnBoostMultiplier")
 						if boostMult then
 							finalDamage = finalDamage * boostMult.Value
-							print(string.format("[STATUS] Hellfire boosted %s damage: %d -> %d", 
-								effectName, tickDamage.Value, finalDamage))
 						end
 					end
 				end
@@ -672,12 +641,9 @@ function Tower.StartDoTEffect(target, effectFolder, effectName)
 				humanoid:TakeDamage(finalDamage)
 				lastTick.Value = tick()
 				
-				print(string.format("[STATUS] %s tick on %s - %d damage (HP: %d/%d)", 
-					effectName, target.Name, finalDamage, humanoid.Health, humanoid.MaxHealth))
 				
 				-- Check if mob died from DoT
 				if humanoid.Health <= 0 then
-					print(string.format("[STATUS] %s killed %s", effectName, target.Name))
 					effectFolder:Destroy()
 					break
 				end
@@ -698,7 +664,6 @@ function Tower.ApplyMovementEffect(target, effectFolder, effectName)
 		local speedMultiplier = effectFolder:FindFirstChild("SpeedMultiplier")
 		
 		if not duration or not speedMultiplier then
-			warn("[STATUS] Missing movement effect parameters for", effectName)
 			return
 		end
 		
@@ -707,8 +672,6 @@ function Tower.ApplyMovementEffect(target, effectFolder, effectName)
 		
 		-- Apply speed modification
 		humanoid.WalkSpeed = originalSpeed * speedMultiplier.Value
-		print(string.format("[STATUS] %s movement applied: %.1f -> %.1f speed", 
-			effectName, originalSpeed, humanoid.WalkSpeed))
 		
 		local startTime = tick()
 		
@@ -720,8 +683,6 @@ function Tower.ApplyMovementEffect(target, effectFolder, effectName)
 			if elapsed >= duration.Value then
 				-- Restore original speed
 				humanoid.WalkSpeed = originalSpeed
-				print(string.format("[STATUS] %s expired on %s - speed restored to %.1f", 
-					effectName, target.Name, originalSpeed))
 				effectFolder:Destroy()
 				break
 			end
@@ -1189,6 +1150,17 @@ function Tower.Spawn(player, name, cframe, previous)
 					valueInstance.Value = paramValue
 					valueInstance.Parent = statusConfig
 				end
+			end
+		end
+
+		-- Set ColorType and Tags from TowerData
+		local towerInfo = TowerData.GetTowerByModelName(name)
+		if towerInfo then
+			if towerInfo.ColorType then
+				newTower.Config:SetAttribute("ColorType", towerInfo.ColorType)
+			end
+			if towerInfo.Tags then
+				newTower.Config:SetAttribute("Tags", table.concat(towerInfo.Tags, ","))
 			end
 		end
 

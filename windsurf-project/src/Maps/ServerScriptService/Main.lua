@@ -24,6 +24,9 @@ local gameOver = false
 -- Initialize ActManager with defaults (will be updated when player joins)
 ActManager.Initialize("RockMap", 1)
 
+-- Forward declaration for runWave (needed for skip callback)
+local runWave
+
 -- Track if we've received teleport data
 local teleportDataReceived = false
 
@@ -58,6 +61,8 @@ map.Base.Humanoid.HealthChanged:Connect(function(health)
 		gameOver = true
 		ActManager.GameOver()
 		info.Message.Value = "Game Over"
+		-- Clear all remaining mobs
+		workspace.Mobs:ClearAllChildren()
 	end
 end)
 
@@ -99,8 +104,14 @@ local function resetGameState()
 	print("[Main] Game state reset")
 end
 
+-- Wave generation tracker to prevent stale completion handlers from double-advancing
+local waveGeneration = 0
+
 -- Spawn wave and handle completion
-local function runWave()
+runWave = function()
+	waveGeneration = waveGeneration + 1
+	local myGeneration = waveGeneration
+	
 	local currentAct = ActManager.GetCurrentAct()
 	local currentWave = ActManager.GetCurrentWave()
 	local wavesPerAct = ActManager.GetWavesPerAct()
@@ -121,6 +132,9 @@ local function runWave()
 		until #workspace.Mobs:GetChildren() == 0 or gameOver
 		
 		if gameOver then return end
+		
+		-- If wave was skipped, a newer runWave already handles progression
+		if myGeneration ~= waveGeneration then return end
 		
 		-- Award cash reward
 		local reward = 50 + (10 * currentWave)
@@ -152,6 +166,11 @@ local function runWave()
 			end
 		end
 	end)
+end
+
+-- Register skip wave callback so GameManager can trigger the next wave
+GameManager.OnSkipWave = function()
+	runWave()
 end
 
 -- Listen for game start from GameManager

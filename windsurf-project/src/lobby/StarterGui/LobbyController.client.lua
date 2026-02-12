@@ -5,6 +5,7 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local TweenService = game:GetService("TweenService")
 local RunService = game:GetService("RunService")
 local ContentProvider = game:GetService("ContentProvider")
+local UserInputService = game:GetService("UserInputService")
 
 local player = Players.LocalPlayer
 print("LobbyController: Got player:", player.Name)
@@ -550,10 +551,10 @@ local function HideSummonResult()
 		savedCameraType = nil
 	end
 
-	-- Restore all GUI elements that were hidden (except InventoryUI, ErrorMessage, and MapSelectorUI)
+	-- Restore all GUI elements that were hidden (except ones that should stay hidden)
+	local keepHidden = {ResultFrame = true, InventoryUI = true, InventoryUI2 = true, ErrorMessage = true, MapSelectorUI = true}
 	for _, child in ipairs(gui:GetChildren()) do
-		if child:IsA("GuiObject") and child.Name ~= "ResultFrame" and child.Name ~= "InventoryUI" and child.Name ~= "ErrorMessage" and child.Name ~= "MapSelectorUI" then
-			-- Show all GUI elements except ResultFrame, InventoryUI, ErrorMessage, and MapSelectorUI
+		if child:IsA("GuiObject") and not keepHidden[child.Name] then
 			child.Visible = true
 		end
 	end
@@ -3444,85 +3445,31 @@ end
 -- Initialize
 function LobbyController.Initialize()
 	-- ═══════════════════════════════════════════════════════
-	-- LOADING SCREEN: black overlay with progress bar
+	-- LOADING SCREEN: preload assets with progress bar
 	-- ═══════════════════════════════════════════════════════
-	local loadingScreenGui = Instance.new("ScreenGui")
-	loadingScreenGui.Name = "LoadingScreen"
-	loadingScreenGui.DisplayOrder = 10
-	loadingScreenGui.IgnoreGuiInset = true
-	loadingScreenGui.Parent = player:WaitForChild("PlayerGui")
+	local camera = workspace.CurrentCamera
+	local playerGui = player:WaitForChild("PlayerGui")
+	local loadingScreenGui = playerGui:WaitForChild("LoadingScreen")
 
-	local overlay = Instance.new("Frame")
-	overlay.Name = "Overlay"
-	overlay.Size = UDim2.new(1, 0, 1, 0)
-	overlay.BackgroundColor3 = Color3.new(0, 0, 0)
-	overlay.BackgroundTransparency = 0
-	overlay.BorderSizePixel = 0
-	overlay.Parent = loadingScreenGui
+	-- Get loading screen elements
+	local loadBar = loadingScreenGui:FindFirstChild("LoadBar", true)
+	local currentLoadBar = loadBar and loadBar:FindFirstChild("CurrentLoad")
+	local maxLoadBar = loadBar and loadBar:FindFirstChild("MaxLoad")
+	local loadingTextLabel = loadingScreenGui:FindFirstChild("Loading...", true)
+	local numberLabel = loadingScreenGui:FindFirstChild("Number", true)
 
-	local loadingLabel = Instance.new("TextLabel")
-	loadingLabel.Name = "LoadingLabel"
-	loadingLabel.Size = UDim2.new(0.4, 0, 0.06, 0)
-	loadingLabel.Position = UDim2.new(0.3, 0, 0.42, 0)
-	loadingLabel.BackgroundTransparency = 1
-	loadingLabel.Text = "Loading..."
-	loadingLabel.TextColor3 = Color3.new(1, 1, 1)
-	loadingLabel.TextScaled = true
-	loadingLabel.Font = Enum.Font.GothamBold
-	loadingLabel.Parent = overlay
+	-- All direct children of LoadingScreen stay visible (Frame, ToolTip, LoadBar, etc.)
 
-	local barBg = Instance.new("Frame")
-	barBg.Name = "BarBackground"
-	barBg.Size = UDim2.new(0.4, 0, 0.02, 0)
-	barBg.Position = UDim2.new(0.3, 0, 0.49, 0)
-	barBg.BackgroundColor3 = Color3.fromRGB(40, 40, 40)
-	barBg.BorderSizePixel = 0
-	barBg.Parent = overlay
+	-- Lock camera
+	camera.CameraType = Enum.CameraType.Scriptable
+	camera.CFrame = CFrame.new(-600, 600, 0)
 
-	local barCorner = Instance.new("UICorner")
-	barCorner.CornerRadius = UDim.new(0.5, 0)
-	barCorner.Parent = barBg
-
-	local barFill = Instance.new("Frame")
-	barFill.Name = "BarFill"
-	barFill.Size = UDim2.new(0, 0, 1, 0)
-	barFill.BackgroundColor3 = Color3.fromRGB(85, 170, 255)
-	barFill.BorderSizePixel = 0
-	barFill.Parent = barBg
-
-	local fillCorner = Instance.new("UICorner")
-	fillCorner.CornerRadius = UDim.new(0.5, 0)
-	fillCorner.Parent = barFill
-
-	local progressLabel = Instance.new("TextLabel")
-	progressLabel.Name = "ProgressLabel"
-	progressLabel.Size = UDim2.new(0.4, 0, 0.03, 0)
-	progressLabel.Position = UDim2.new(0.3, 0, 0.52, 0)
-	progressLabel.BackgroundTransparency = 1
-	progressLabel.Text = "0 / 0"
-	progressLabel.TextColor3 = Color3.fromRGB(180, 180, 180)
-	progressLabel.TextScaled = true
-	progressLabel.Font = Enum.Font.Gotham
-	progressLabel.Parent = overlay
-
-	local skipLabel = Instance.new("TextLabel")
-	skipLabel.Name = "SkipLabel"
-	skipLabel.Size = UDim2.new(0.3, 0, 0.03, 0)
-	skipLabel.Position = UDim2.new(0.35, 0, 0.58, 0)
-	skipLabel.BackgroundTransparency = 1
-	skipLabel.Text = "Click anywhere to skip"
-	skipLabel.TextColor3 = Color3.fromRGB(120, 120, 120)
-	skipLabel.TextScaled = true
-	skipLabel.Font = Enum.Font.Gotham
-	skipLabel.Parent = overlay
-
-	-- Skip button (invisible, covers entire screen)
-	local skipButton = Instance.new("TextButton")
-	skipButton.Name = "SkipButton"
-	skipButton.Size = UDim2.new(1, 0, 1, 0)
-	skipButton.BackgroundTransparency = 1
-	skipButton.Text = ""
-	skipButton.Parent = overlay
+	-- Hide main lobby UI elements during loading
+	local lobbyUIElements = {"GemsDisplay", "LoadoutFrame", "PlayButton", "Buttons"}
+	for _, name in ipairs(lobbyUIElements) do
+		local el = gui:FindFirstChild(name)
+		if el then el.Visible = false end
+	end
 
 	local loadingSkipped = false
 	local loadingDone = false
@@ -3530,18 +3477,40 @@ function LobbyController.Initialize()
 	local function dismissLoadingScreen()
 		if loadingDone then return end
 		loadingDone = true
-		TweenService:Create(overlay, TweenInfo.new(0.5, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-			BackgroundTransparency = 1
-		}):Play()
-		TweenService:Create(loadingLabel, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
-		TweenService:Create(progressLabel, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
-		TweenService:Create(skipLabel, TweenInfo.new(0.3), { TextTransparency = 1 }):Play()
-		TweenService:Create(barBg, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
-		TweenService:Create(barFill, TweenInfo.new(0.3), { BackgroundTransparency = 1 }):Play()
+		-- Fade out all visible loading GUI elements
+		for _, desc in ipairs(loadingScreenGui:GetDescendants()) do
+			if desc:IsA("ImageLabel") or desc:IsA("ImageButton") then
+				TweenService:Create(desc, TweenInfo.new(0.5), { ImageTransparency = 1 }):Play()
+			elseif desc:IsA("TextLabel") or desc:IsA("TextButton") then
+				TweenService:Create(desc, TweenInfo.new(0.5), { TextTransparency = 1 }):Play()
+			end
+			if desc:IsA("GuiObject") then
+				TweenService:Create(desc, TweenInfo.new(0.5), { BackgroundTransparency = 1 }):Play()
+			end
+			if desc:IsA("UIStroke") then
+				TweenService:Create(desc, TweenInfo.new(0.5), { Transparency = 1 }):Play()
+			end
+		end
 		task.delay(0.6, function()
 			loadingScreenGui:Destroy()
+			-- Release camera back to default
+			camera.CameraType = Enum.CameraType.Custom
+			-- Reveal lobby UI elements
+			for _, name in ipairs(lobbyUIElements) do
+				local el = gui:FindFirstChild(name)
+				if el then el.Visible = true end
+			end
 		end)
 	end
+
+	-- Click anywhere to skip
+	local skipButton = Instance.new("TextButton")
+	skipButton.Name = "SkipButton"
+	skipButton.Size = UDim2.new(1, 0, 1, 0)
+	skipButton.BackgroundTransparency = 1
+	skipButton.Text = ""
+	skipButton.ZIndex = 100
+	skipButton.Parent = loadingScreenGui
 
 	skipButton.Activated:Connect(function()
 		loadingSkipped = true
@@ -3551,60 +3520,130 @@ function LobbyController.Initialize()
 	-- Collect ALL assets to preload
 	task.spawn(function()
 		local assetsToPreload = {}
+		local addedAssets = {}
+
+		local function addAsset(asset)
+			if asset and not addedAssets[asset] then
+				addedAssets[asset] = true
+				table.insert(assetsToPreload, asset)
+			end
+		end
 
 		-- All images in the entire LobbyGui
 		for _, desc in ipairs(gui:GetDescendants()) do
 			if (desc:IsA("ImageLabel") or desc:IsA("ImageButton")) and desc.Image ~= "" then
-				table.insert(assetsToPreload, desc)
+				addAsset(desc)
+			end
+		end
+
+		-- All images in the LoadingScreen itself
+		for _, desc in ipairs(loadingScreenGui:GetDescendants()) do
+			if (desc:IsA("ImageLabel") or desc:IsA("ImageButton")) and desc.Image ~= "" then
+				addAsset(desc)
 			end
 		end
 
 		-- All tab animations (idles + directional transitions)
-		local preloadedIds = {}
 		for _, id in pairs(TAB_IDLE_ANIMS) do
-			if id and not preloadedIds[id] then
-				preloadedIds[id] = true
+			if id then
 				local anim = Instance.new("Animation")
 				anim.AnimationId = id
-				table.insert(assetsToPreload, anim)
+				addAsset(anim)
 			end
 		end
 		for _, toTable in pairs(TAB_TRANSITIONS) do
 			for _, id in pairs(toTable) do
-				if id and not preloadedIds[id] then
-					preloadedIds[id] = true
+				if id then
 					local anim = Instance.new("Animation")
 					anim.AnimationId = id
-					table.insert(assetsToPreload, anim)
+					addAsset(anim)
 				end
 			end
 		end
 
-		-- All tower models
-		local towersFolder = ReplicatedStorage:FindFirstChild("Towers")
-		if towersFolder then
-			for _, model in ipairs(towersFolder:GetChildren()) do
-				table.insert(assetsToPreload, model)
+		-- Helper: scan a container for all preloadable descendants
+		local function scanForPreloadable(container)
+			for _, desc in ipairs(container:GetDescendants()) do
+				if desc:IsA("MeshPart") or desc:IsA("SpecialMesh") then
+					addAsset(desc)
+				elseif desc:IsA("Decal") or desc:IsA("Texture") then
+					addAsset(desc)
+				elseif desc:IsA("Sound") then
+					addAsset(desc)
+				elseif (desc:IsA("ImageLabel") or desc:IsA("ImageButton")) and desc.Image ~= "" then
+					addAsset(desc)
+				elseif desc:IsA("Shirt") or desc:IsA("Pants") or desc:IsA("ShirtGraphic") then
+					addAsset(desc)
+				end
 			end
 		end
 
+		-- All preloadable assets in ReplicatedStorage (Towers, Shared, etc.)
+		scanForPreloadable(ReplicatedStorage)
+
+		-- All preloadable assets in workspace (lobby environment meshes, textures, sounds)
+		scanForPreloadable(workspace)
+
+		-- SoundService
+		local soundService = game:GetService("SoundService")
+		scanForPreloadable(soundService)
+
 		local totalAssets = #assetsToPreload
 		local loadedCount = 0
-		progressLabel.Text = "0 / " .. totalAssets
+		print("LobbyController: Preloading", totalAssets, "assets")
+
+		-- Display initial count in Number label
+		if numberLabel then
+			numberLabel.Text = "0/" .. totalAssets
+		end
+
+		-- CurrentLoad bar: shrink to zero width, grow to {1.382, 0, 1.03, 0} as assets load
+		-- MaxLoad stays the same size (background bar)
+		local targetXScale = 1.382
+		local targetYScale = 1.03
+		if currentLoadBar then
+			currentLoadBar.Size = UDim2.new(0, 0, targetYScale, 0)
+		end
 
 		ContentProvider:PreloadAsync(assetsToPreload, function(assetId, status)
 			loadedCount = loadedCount + 1
 			if not loadingDone then
-				local pct = loadedCount / math.max(totalAssets, 1)
-				barFill.Size = UDim2.new(pct, 0, 1, 0)
-				progressLabel.Text = loadedCount .. " / " .. totalAssets
+				local pct = math.min(loadedCount / math.max(totalAssets, 1), 1)
+				if currentLoadBar then
+					currentLoadBar.Size = UDim2.new(
+						targetXScale * pct,
+						0,
+						targetYScale,
+						0
+					)
+				end
+				if numberLabel then
+					numberLabel.Text = math.min(loadedCount, totalAssets) .. "/" .. totalAssets
+				end
 			end
 		end)
 
 		print("LobbyController: All assets preloaded (" .. totalAssets .. " items)")
 		if not loadingSkipped then
-			task.wait(0.3) -- Brief pause so user sees 100%
+			task.wait(0.8)
 			dismissLoadingScreen()
+		end
+	end)
+
+	-- Shift+F2: toggle camera lock at loading screen coords (debug)
+	local debugCamLocked = false
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.KeyCode == Enum.KeyCode.F2 and UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) then
+			debugCamLocked = not debugCamLocked
+			if debugCamLocked then
+				camera.CameraType = Enum.CameraType.Scriptable
+				camera.CFrame = CFrame.new(-600, 600, 0)
+				print("LobbyController: Debug camera LOCKED at loading screen position")
+			else
+				camera.CameraType = Enum.CameraType.Custom
+				print("LobbyController: Debug camera UNLOCKED")
+			end
 		end
 	end)
 
